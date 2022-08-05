@@ -1,0 +1,6 @@
+const { add } = require("./a.js")
+module.exports = require("./a.js")
+const o = require("./a.js")
+module.exports.adding = add(1, 2) === o.add(1, 2)
+console.assert(module.exports.adding, "handle commonjs failed")
+console.assert(module.exports.msg === "common", "handle commonjs failed")
