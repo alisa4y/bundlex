@@ -1,4 +1,4 @@
-import { shield, factory, replaceMulti } from "js-tools"
+import { shield, factory, replaceMulti, timeout } from "js-tools"
 import { watch } from "fs"
 import { readFile } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
@@ -39,7 +39,17 @@ const Rgxs = {
 async function transformFile(path) {
   let imports = new Set()
   let exports = ""
-  const file = await replaceMulti(await readFile(path, "utf8"), [
+  let fileData = await readFile(path, "utf8")
+  if (fileData === "") {
+    let count = 10
+    while (count--) {
+      await timeout(50)
+      fileData = await readFile(path, "utf8")
+      if (fileData !== "") break
+    }
+    if (fileData === "") console.log("file is empty, can't read it", path)
+  }
+  const file = await replaceMulti(fileData, [
     [
       Rgxs.impFrom,
       async (m, ims, p) => {
