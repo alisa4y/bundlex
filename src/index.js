@@ -33,6 +33,7 @@ const Rgxs = {
   impFrom: /import\s+(.*)\s+from\s*(?:"|')(.*?)(?:"|')/g,
   expFrom: /export\s+\*\s+from\s+(?:"|')(.*?)(?:"|')/g,
   exp: /export\s+(?:const|let|var|function)?\s*([^\s(]+)?\s*/g,
+  expB: /export\s*\{(.*)\}/g,
   req: /require\((?:"|'|`)(.*)(?:"|'|`)\)/g,
   exports: /([\s;({[]|^)(?:module\.)?exports/g,
 }
@@ -74,6 +75,17 @@ async function transformFile(path) {
         if (name === "*") return m
         exports += `__exports.${name} = ${name};`
         return m.slice(7)
+      },
+    ],
+    [
+      Rgxs.expB,
+      async (m, p) => {
+        const exs = p.split(",")
+        exs.forEach(ex => {
+          let [name, nick] = ex.trim().split("as")
+          exports += `__exports.${nick} = ${name};`
+          return ""
+        })
       },
     ],
     [
