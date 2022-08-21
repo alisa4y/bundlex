@@ -1,4 +1,4 @@
-import { shield, factory, replaceMulti, timeout } from "js-tools"
+import { shield, factory, replaceMulti, timeout, each } from "js-tools"
 import { watch } from "fs"
 import { readFile } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
@@ -34,9 +34,16 @@ const Rgxs = {
   expFrom: /export\s+\*\s+from\s+(?:"|')(.*?)(?:"|')/g,
   exp: /export\s+(?:const|let|var|function)?\s*([^\s(]+)?\s*/g,
   expB: /export\s*\{(.*)\}/g,
+  expDef: /export\s*default\s*/g,
   req: /require\((?:"|'|`)(.*)(?:"|'|`)\)/g,
   exports: /([\s;({[]|^)(?:module\.)?exports/g,
 }
+const impRgx = [
+  /\s*\*\s+as\s+(\w+)\s*/y, // import * as name from "path"
+  /\s*\{.*\}\s*/y, // import {name} from "path"
+  /\s*\w+\s*/y, // import name from "path"
+]
+
 async function transformFile(path) {
   let imports = new Set()
   let exports = ""
@@ -50,55 +57,89 @@ async function transformFile(path) {
     }
     if (fileData === "") console.log("file is empty, can't read it", path)
   }
-  const file = await replaceMulti(fileData, [
-    [
-      Rgxs.impFrom,
-      async (m, ims, p) => {
-        const imPath = await figurePath(dirname(path), p)
-        imports.add(imPath)
-        return `const ${ims} = ${ids[imPath]}()\n`
-      },
-    ],
-    [
-      Rgxs.expFrom,
-      async (m, p) => {
-        const imPath = await figurePath(dirname(path), p)
-        imports.add(imPath)
-        const name = basename(p, ".js")
-        exports += `Object.assign(__exports,${name});`
-        return `const ${name} = ${ids[imPath]}()\n`
-      },
-    ],
-    [
-      Rgxs.exp,
-      (m, name) => {
-        if (name === "*") return m
-        exports += `__exports.${name} = ${name};`
-        return m.slice(7)
-      },
-    ],
-    [
-      Rgxs.expB,
-      async (m, p) => {
-        const exs = p.split(",")
-        exs.forEach(ex => {
-          let [name, nick] = ex.trim().split("as")
-          exports += `__exports.${nick} = ${name};`
-          return ""
-        })
-      },
-    ],
-    [
-      Rgxs.req,
-      async (m, p) => {
-        const imPath = await figurePath(dirname(path), p)
-        imports.add(imPath)
-        return `${ids[imPath]}()\n`
-      },
-    ],
-    [Rgxs.exports, (m, g) => (g ? g : "") + "__exports"],
-  ])
-  imports = await Promise.all([...imports].map(imPath => files[imPath]))
+  let file = fileData
+  switch (extname(path)) {
+    case ".json":
+      file = `export default ${fileData}`
+    default:
+      file = await replaceMulti(fileData, [
+        [
+          Rgxs.impFrom,
+          async (m, ims, p) => {
+            const imPath = await figurePath(dirname(path), p)
+            imports.add(imPath)
+            let strIndex = 0
+            let ret = ""
+            const handlers = [
+              (m, name) => (ret += `const ${name} = ${ids[imPath]}()\n`),
+              m =>
+                (ret += `const ${m.replace("as", ":")} = ${ids[imPath]}()\n`),
+              m => (ret += `const ${m} = ${ids[imPath]}().default\n`),
+            ]
+            while (strIndex < ims.length) {
+              impRgx.some((r, i) => {
+                r.lastIndex = strIndex
+                const retExec = r.exec(ims)
+                if (retExec) {
+                  handlers[i](...retExec)
+                  strIndex = r.lastIndex
+                  return true
+                }
+                return false
+              })
+              if (ims[strIndex] === ",") strIndex++
+              else break
+            }
+            return ret
+          },
+        ],
+        [
+          Rgxs.expDef,
+          m => {
+            return "__exports.default ="
+          },
+        ],
+        [
+          Rgxs.expFrom,
+          async (m, p) => {
+            const imPath = await figurePath(dirname(path), p)
+            imports.add(imPath)
+            const name = basename(p, ".js")
+            exports += `Object.assign(__exports,${name});`
+            return `const ${name} = ${ids[imPath]}()\n`
+          },
+        ],
+        [
+          Rgxs.exp,
+          (m, name) => {
+            if (name === "*") return m
+            exports += `__exports.${name} = ${name};`
+            return m.slice(7)
+          },
+        ],
+        [
+          Rgxs.expB,
+          (m, p) => {
+            const exs = p.split(",")
+            exs.forEach(ex => {
+              let [name, nick] = ex.trim().split("as")
+              exports += `__exports.${nick} = ${name};`
+            })
+            return ""
+          },
+        ],
+        [
+          Rgxs.req,
+          async (m, p) => {
+            const imPath = await figurePath(dirname(path), p)
+            imports.add(imPath)
+            return `${ids[imPath]}()\n`
+          },
+        ],
+        [Rgxs.exports, (m, g) => (g ? g : "") + "__exports"],
+      ])
+      imports = await Promise.all([...imports].map(imPath => files[imPath]))
+  }
   const obj = {
     id: ids[path],
     path,

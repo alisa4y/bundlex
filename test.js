@@ -1,11 +1,5 @@
-import { RO, timeout } from "js-tools"
-import { readFile } from "fs/promises"
-// import { readFile } from "fs"
+const r = /\s*\{.*\}\s*/y
+r.lastIndex = 1
+const str = "{ greet }"
 
-process.on("beforeExit", () => {
-  console.log("a")
-})
-process.on("beforeExit", () => {
-  console.log("b")
-})
-setTimeout(() => {}, 10000)
+console.log(r.exec(str))
