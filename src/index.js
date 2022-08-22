@@ -18,11 +18,15 @@ async function figurePath(dir, path) {
     path = join(dir, path)
     if (extname(path) === "") path += ".js"
     return path
+  } else if (path[0] === "/") {
+    path = join(process.cwd(), path)
+    return path
+  } else {
+    path = join(process.cwd(), "node_modules", path)
+    return await readFile(join(path, "package.json"), "utf8").then(json =>
+      join(path, JSON.parse(json).main)
+    )
   }
-  path = join(process.cwd(), "node_modules", path)
-  return await readFile(join(path, "package.json"), "utf8").then(json =>
-    join(path, JSON.parse(json).main)
-  )
 }
 function wrapFile(file, exports, id) {
   return `function(__exports={}, module={}) {${
@@ -60,7 +64,7 @@ async function transformFile(path) {
   let file = fileData
   switch (extname(path)) {
     case ".json":
-      file = `export default ${fileData}`
+      fileData = `export default ${fileData}`
     default:
       file = await replaceMulti(fileData, [
         [

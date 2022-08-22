@@ -51,7 +51,7 @@ impundler("./test/modules/m1.js", { watch: true }, async m => {
 })
 
 impundler("./test/modules/m3.js", m => {
-  // writeFileSync("./bundle.js", m, "utf8")
+  writeFileSync("./bundle.js", m, "utf8")
   eval(m)
 })
 impundler("./test/common/b.js", m => {
