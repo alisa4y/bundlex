@@ -1,6 +1,6 @@
 import { shield, factory, replaceMulti, timeout, each } from "js-tools"
 import { watch } from "fs"
-import { readFile } from "fs/promises"
+import { readFile, access } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
 
 const defaultOptions = {
@@ -13,6 +13,21 @@ const genId = (function () {
   return () => "id" + i++
 })()
 const ids = factory(() => genId())
+async function findNodeModules(dir) {
+  try {
+    const path = join(dir, "node_modules")
+    await access(path)
+    return path
+  } catch (e) {
+    const newDir = dirname(dir)
+    if (newDir !== dir) {
+      return findNodeModules(newDir)
+    } else {
+      console.log("couldn't find node_module for dir " + dir)
+      return
+    }
+  }
+}
 async function figurePath(dir, path) {
   if (path[0] === ".") {
     path = join(dir, path)
@@ -22,7 +37,7 @@ async function figurePath(dir, path) {
     path = join(process.cwd(), path)
     return path
   } else {
-    path = join(process.cwd(), "node_modules", path)
+    path = join(await findNodeModules(dir), path)
     return await readFile(join(path, "package.json"), "utf8").then(json =>
       join(path, JSON.parse(json).main)
     )
