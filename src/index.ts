@@ -1,53 +1,15 @@
-import { shield, factory, timeout, each } from "js-tools"
+import { shield, factory, timeout } from "flowco"
+import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
 import { readFile, access } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
 
-function replaceMulti(str, rs) {
-  return Promise.all(
-    rs.reduce(
-      (parts, [rgx, callback]) => {
-        return parts
-          .map(s =>
-            typeof s === "string" ? collectReplaceParts(s, rgx, callback) : s
-          )
-          .flat()
-      },
-      [str]
-    )
-  ).then(parts => parts.join(""))
-}
-function replaceAsync(str, rgx, callback) {
-  return Promise.all(collectReplaceParts(str, rgx, callback)).thes(s =>
-    s.join("")
-  )
-}
-function collectReplaceParts(str, rgx, callback) {
-  let parts = [],
-    i = 0
-  if (Object.prototype.toString.call(rgx) == "[object RegExp]") {
-    if (rgx.global) rgx.lastIndex = i
-    let m
-    while ((m = rgx.exec(str))) {
-      let args = m.concat([m.index, m.input])
-      i !== m.index && parts.push(str.slice(i, m.index))
-      parts.push(callback(...args))
-      i = rgx.lastIndex
-      if (!rgx.global) break // for non-global regexes only take the first match
-      if (m[0].length === 0) rgx.lastIndex++
-    }
-  } else {
-    rgx = String(rgx)
-    i = str.indexOf(rgx)
-    i !== m.index && parts.push(str.slice(i, m.index))
-    parts.push(callback(rgx, i, str))
-    i += rgx.length
-  }
-  parts.push(str.slice(i))
-  return parts
+interface IOptions {
+  minify: boolean
+  watch: boolean
 }
 
-const defaultOptions = {
+const defaultOptions: IOptions = {
   // cache: true,
   minify: false,
   watch: false,
@@ -57,7 +19,7 @@ const genId = (function () {
   return () => "id" + i++
 })()
 const ids = factory(() => genId())
-async function findNodeModules(dir) {
+async function findNodeModules(dir: string): Promise<string> {
   try {
     const path = join(dir, "node_modules")
     await access(path)
@@ -67,12 +29,11 @@ async function findNodeModules(dir) {
     if (newDir !== dir) {
       return findNodeModules(newDir)
     } else {
-      console.log("couldn't find node_module for dir " + dir)
-      return
+      throw Error("couldn't find node_module for dir " + dir)
     }
   }
 }
-async function figurePath(dir, path) {
+async function figurePath(dir: string, path: string) {
   if (path[0] === ".") {
     path = join(dir, path)
     if (extname(path) === "") path += ".js"
@@ -87,7 +48,7 @@ async function figurePath(dir, path) {
     )
   }
 }
-function wrapFile(file, exports, id) {
+function wrapFile(file: string, exports: string, id: string) {
   return `function(__exports={}, module={}) {${
     file + "\n" + exports
   } \n   ${id}=()=>__exports;  return __exports}`
@@ -106,10 +67,19 @@ const impRgx = [
   /\s*\{.*\}\s*/y, // import {name} from "path"
   /\s*\w+\s*/y, // import name from "path"
 ]
-
-async function transformFile(path) {
-  let imports = new Set()
+interface IFileNode {
+  id: string
+  path: string
+  content: string
+  imports: IFileNode[]
+  usedBy: Set<IFileNode>
+  watcher?: ReturnType<typeof watch>
+  onChange?: () => void
+}
+async function transformFile(path: string): Promise<IFileNode> {
+  const importsString: Set<string> = new Set()
   let exports = ""
+  let imports = []
   let fileData = await readFile(path, "utf8")
   if (fileData === "") {
     let count = 10
@@ -125,26 +95,27 @@ async function transformFile(path) {
     case ".json":
       fileData = `export default ${fileData}`
     default:
-      file = await replaceMulti(fileData, [
-        [
-          Rgxs.impFrom,
-          async (m, ims, p) => {
+      file = await asyncReplaceMultiPattern(fileData, [
+        {
+          regexp: Rgxs.impFrom,
+          callback: async (m, ims, p) => {
             const imPath = await figurePath(dirname(path), p)
-            imports.add(imPath)
+            importsString.add(imPath)
             let strIndex = 0
             let ret = ""
             const handlers = [
-              (m, name) => (ret += `const ${name} = ${ids[imPath]}()\n`),
-              m =>
+              (m: string, name: string) =>
+                (ret += `const ${name} = ${ids[imPath]}()\n`),
+              (m: string) =>
                 (ret += `const ${m.replace("as", ":")} = ${ids[imPath]}()\n`),
-              m => (ret += `const ${m} = ${ids[imPath]}().default\n`),
+              (m: string) => (ret += `const ${m} = ${ids[imPath]}().default\n`),
             ]
             while (strIndex < ims.length) {
               impRgx.some((r, i) => {
                 r.lastIndex = strIndex
                 const retExec = r.exec(ims)
                 if (retExec) {
-                  handlers[i](...retExec)
+                  handlers[i].apply(null, retExec)
                   strIndex = r.lastIndex
                   return true
                 }
@@ -155,34 +126,34 @@ async function transformFile(path) {
             }
             return ret
           },
-        ],
-        [
-          Rgxs.expDef,
-          m => {
+        },
+        {
+          regexp: Rgxs.expDef,
+          callback: m => {
             return "__exports.default ="
           },
-        ],
-        [
-          Rgxs.expFrom,
-          async (m, p) => {
+        },
+        {
+          regexp: Rgxs.expFrom,
+          callback: async (m, p) => {
             const imPath = await figurePath(dirname(path), p)
-            imports.add(imPath)
+            importsString.add(imPath)
             const name = basename(p, ".js")
             exports += `Object.assign(__exports,${name});`
             return `const ${name} = ${ids[imPath]}()\n`
           },
-        ],
-        [
-          Rgxs.exp,
-          (m, name) => {
+        },
+        {
+          regexp: Rgxs.exp,
+          callback: (m, name) => {
             if (name === "*") return m
             exports += `__exports.${name} = ${name};`
             return m.slice(7)
           },
-        ],
-        [
-          Rgxs.expB,
-          (m, p) => {
+        },
+        {
+          regexp: Rgxs.expB,
+          callback: (m, p) => {
             const exs = p.split(",")
             exs.forEach(ex => {
               let [name, nick] = ex.trim().split("as")
@@ -190,95 +161,90 @@ async function transformFile(path) {
             })
             return ""
           },
-        ],
-        [
-          Rgxs.req,
-          async (m, p) => {
+        },
+        {
+          regexp: Rgxs.req,
+          callback: async (m, p) => {
             const imPath = await figurePath(dirname(path), p)
-            imports.add(imPath)
+            importsString.add(imPath)
             return `${ids[imPath]}()\n`
           },
-        ],
-        [Rgxs.exports, (m, g) => (g ? g : "") + "__exports"],
+        },
+        {
+          regexp: Rgxs.exports,
+          callback: (m, g) => (g ? g : "") + "__exports",
+        },
       ])
-      imports = await Promise.all([...imports].map(imPath => files[imPath]))
+      imports = await Promise.all(
+        [...importsString].map(imPath => files[imPath])
+      )
   }
-  const obj = {
+  const obj: IFileNode = {
     id: ids[path],
     path,
     imports,
-    allImports: getAllImports(imports),
-    file: wrapFile(file, exports, ids[path]),
-    parents: new Set(),
+    content: wrapFile(file, exports, ids[path]),
+    usedBy: new Set(),
   }
-  imports.forEach(im => im.parents.add(obj))
+  imports.forEach(o => o.usedBy.add(obj))
   return obj
 }
 const files = factory(transformFile)
 
-function getAllImports(imports) {
+function getAllImports(imports: IFileNode[]): Set<IFileNode> {
   return new Set([
     ...imports,
-    ...imports.map(({ allImports }) => [...allImports]).flat(),
+    ...imports.map(({ imports }) => [...getAllImports(imports)]).flat(),
   ])
 }
-function bundle({ allImports, file, id }) {
+
+function bundle({ imports, content, id }: IFileNode) {
   return (
-    [...allImports].map(v => `let ${v.id} = ${v.file} `).join("\n") +
-    `\nlet ${id};(${file})()`
+    [...getAllImports(imports)]
+      .map(v => `let ${v.id} = ${v.content}`)
+      .join("\n") + `\nlet ${id};(${content})()`
   )
 }
-export async function impundler(path, options, onChange) {
+type ImHandler = (bundle: string) => void
+export async function impundler(
+  path: string,
+  options: IOptions | ImHandler,
+  onChange?: ImHandler
+) {
   if (typeof options === "function") {
     onChange = options
-    options = {}
   }
   options = { ...defaultOptions, ...options }
   const entry = await files[path]
   onChange(bundle(entry))
   if (options.watch) {
-    let { allImports } = entry
     entry.onChange = () => {
-      const { allImports: newAllImports } = entry
-      newAllImports.forEach(watchImport)
-      allImports = newAllImports
+      watchAllImports(entry)
       onChange(bundle(entry))
     }
-    allImports.forEach(watchImport)
     watchImport(entry)
   }
   return entry
 }
-function isImportsChanged(imports, newImports) {
-  if (imports.length !== newImports.length) return true
-  if (imports.every((im, i) => im === newImports[i])) return false
-  return imports.any?.(im => !newImports.includes(im))
+function watchAllImports(o: IFileNode) {
+  o.imports.forEach(im => {
+    watchImport(im)
+    watchAllImports(im)
+  })
 }
-function updateParents(im) {
-  im.parents.forEach(p => {
-    p.allImports = getAllImports(p.imports)
+function updateParents(im: IFileNode) {
+  im.usedBy.forEach(p => {
     p.onChange?.()
     updateParents(p)
   })
 }
-const handleChange = shield(async im => {
-  const { imports } = im
-  const {
-    imports: newImports,
-    file: newFile,
-    allImports: newAllImports,
-  } = await transformFile(im.path)
-  if (isImportsChanged(imports, newImports)) {
-    imports.forEach(im => im.parents.delete(im))
-    newImports.forEach(im => im.parents.add(im))
-    im.imports = newImports
-    im.allImports = newAllImports
-  }
-  im.file = newFile
+const handleChange = shield(async (im: IFileNode) => {
+  im.imports.forEach(o => o.usedBy.delete(im))
+  Object.assign(im, await transformFile(im.path))
   im.onChange?.()
   updateParents(im)
 }, 200)
-function watchImport(im) {
+function watchImport(im: IFileNode) {
   im.watcher ??= watch(
     im.path,
     eventType => eventType === "change" && handleChange(im)

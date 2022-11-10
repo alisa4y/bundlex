@@ -1,4 +1,5 @@
 node_modules
 package-lock.json
-test.js
+dist
 bundle.js
+test.js

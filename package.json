@@ -1,19 +1,39 @@
 {
-  "name": "js-bundler",
-  "version": "1.0.0",
-  "description": "",
-  "main": "src/index.js",
+  "name": "js_bundler",
+  "version": "0.0.1",
+  "description": "very fast in memory javascript bundler",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "test": "node test/index.js"
+    "build": "tsc",
+    "test": "mocha"
   },
-  "author": "",
+  "keywords": [
+    "bundler",
+    "javascript",
+    "json",
+    "typescript",
+    "quick",
+    "fast",
+    "rapid",
+    "watchable"
+  ],
+  "author": "ali safari",
   "license": "ISC",
   "dependencies": {
-    "js-tools": "file:../js-tools"
+    "flowco": "^0.0.2"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/alisa4y/js-bundler.git"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.4",
+    "@types/mocha": "^10.0.0",
+    "chai": "^4.3.7",
+    "mocha": "^10.1.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.8.4"
   }
 }
