@@ -4,10 +4,10 @@ import { watch } from "fs"
 import { readFile, access } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
 
-interface IOptions {
+type IOptions = Partial<{
   minify: boolean
   watch: boolean
-}
+}>
 
 const defaultOptions: IOptions = {
   // cache: true,
@@ -76,11 +76,14 @@ interface IFileNode {
   watcher?: ReturnType<typeof watch>
   onChange?: () => void
 }
-async function transformFile(path: string): Promise<IFileNode> {
+function removeUseStrict(content: string) {
+  return content.replace(/[`'"]use strict[`'"];/, "")
+}
+async function getFileStats(path: string) {
   const importsString: Set<string> = new Set()
   let exports = ""
   let imports = []
-  let fileData = await readFile(path, "utf8")
+  let fileData = removeUseStrict(await readFile(path, "utf8"))
   if (fileData === "") {
     let count = 10
     while (count--) {
@@ -179,11 +182,18 @@ async function transformFile(path: string): Promise<IFileNode> {
         [...importsString].map(imPath => files[imPath])
       )
   }
+  return {
+    content: wrapFile(file, exports, ids[path]),
+    imports,
+  }
+}
+async function transformFile(path: string): Promise<IFileNode> {
+  const { imports, content } = await getFileStats(path)
   const obj: IFileNode = {
     id: ids[path],
     path,
     imports,
-    content: wrapFile(file, exports, ids[path]),
+    content,
     usedBy: new Set(),
   }
   imports.forEach(o => o.usedBy.add(obj))
@@ -205,7 +215,7 @@ function bundle({ imports, content, id }: IFileNode) {
       .join("\n") + `\nlet ${id};(${content})()`
   )
 }
-type ImHandler = (bundle: string) => void
+type ImHandler = (result: string, bundle?: Bundle) => void
 export async function impundler(
   path: string,
   options: IOptions | ImHandler,
@@ -219,34 +229,49 @@ export async function impundler(
   onChange(bundle(entry))
   if (options.watch) {
     entry.onChange = () => {
-      watchAllImports(entry)
-      onChange(bundle(entry))
+      onChange(bundle(entry), new Bundle(entry))
     }
-    watchImport(entry)
+    watchAllImports(entry)
   }
   return entry
 }
 function watchAllImports(o: IFileNode) {
-  o.imports.forEach(im => {
-    watchImport(im)
-    watchAllImports(im)
-  })
+  watchImport(o)
+  o.imports.forEach(watchAllImports)
 }
-function updateParents(im: IFileNode) {
+function updateOwners(im: IFileNode) {
   im.usedBy.forEach(p => {
     p.onChange?.()
-    updateParents(p)
+    updateOwners(p)
   })
 }
+
 const handleChange = shield(async (im: IFileNode) => {
   im.imports.forEach(o => o.usedBy.delete(im))
-  Object.assign(im, await transformFile(im.path))
+  Object.assign(im, await getFileStats(im.path))
+  im.imports.forEach(o => o.usedBy.add(im))
+  watchAllImports(im)
   im.onChange?.()
-  updateParents(im)
+  updateOwners(im)
 }, 200)
+
 function watchImport(im: IFileNode) {
   im.watcher ??= watch(
     im.path,
     eventType => eventType === "change" && handleChange(im)
   )
+}
+
+class Bundle {
+  bundle: IFileNode
+  constructor(b: IFileNode) {
+    this.bundle = b
+  }
+  close() {
+    closeWatcher(this.bundle)
+  }
+}
+function closeWatcher(o: IFileNode) {
+  o.watcher?.close()
+  o.imports.forEach(closeWatcher)
 }

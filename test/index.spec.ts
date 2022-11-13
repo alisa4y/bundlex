@@ -1,9 +1,6 @@
-import { beforeEach, describe, it } from "mocha"
-import * as chai from "chai"
 import { impundler } from "../src"
 import { writeFile } from "fs/promises"
-
-const { expect } = chai
+import { timeout } from "flowco"
 
 const expected = [
   "hello world",
@@ -19,7 +16,7 @@ describe("impundler", () => {
       writeFile(
         "./test/modules/m1.js",
         `import { greet } from "./m2.js"
-        greet("ali")`
+        return greet("ali")`
       ),
       writeFile(
         "./test/modules/m2.js",
@@ -31,7 +28,67 @@ describe("impundler", () => {
   })
   it("bundles javascript file into one big file", () => {
     impundler("./test/modules/m1.js", result => {
-      expect(result === "hello ali")
+      expect(eval(result)).toEqual("hi ali")
     })
+  })
+  it("can read json file", () => {
+    impundler("./test/modules/readJson.js", result => {
+      eval(result)
+    })
+  })
+  it("can import default export", () => {
+    impundler("./test/modules/getDef.js", result => {
+      eval(result)
+    })
+  })
+  it("can bundle commonjs file", () => {
+    impundler("./test/common/b.js", result => {
+      eval(result)
+    })
+  })
+  it("can bundle from node_modules", () => {
+    impundler("./test/modules/m3.js", result => {
+      eval(result)
+    })
+  })
+  it("can watch for changes", done => {
+    const changes = [
+      () =>
+        writeFile(
+          "./test/modules/m1.js",
+          `import { greet } from "./m2.js"
+          return greet("batman")`
+        ),
+      () =>
+        writeFile(
+          "./test/modules/m2.js",
+          `export function greet(name) {
+            return "hello " + name
+          }`
+        ),
+      () =>
+        writeFile(
+          "./test/modules/m1.js",
+          `import { greet } from "./m2.js"
+          return greet("world")`
+        ),
+      ,
+    ]
+    let expects = ["hi ali", "hi batman", "hello batman", "hello world"]
+    let index = 0
+    impundler(
+      "./test/modules/m1.js",
+      { watch: true },
+      async (result, bundle) => {
+        expect(eval(result)).toEqual(expects[index])
+
+        await timeout(350) // the watcher wont execute for 200ms
+        changes[index++]?.()
+        if (index === changes.length) {
+          bundle?.close()
+          done()
+        }
+      }
+    )
   })
 })

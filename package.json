@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "mocha"
+    "test": "jest"
   },
   "keywords": [
     "bundler",
@@ -22,18 +22,18 @@
   "author": "ali safari",
   "license": "ISC",
   "dependencies": {
-    "flowco": "^0.0.2"
+    "arep": "file:../js-asyncStringReplacer",
+    "flowco": "file:../js-logic"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/alisa4y/js-bundler.git"
   },
   "devDependencies": {
-    "@types/chai": "^4.3.4",
-    "@types/mocha": "^10.0.0",
-    "chai": "^4.3.7",
-    "mocha": "^10.1.0",
-    "ts-node": "^10.9.1",
+    "@types/jest": "^29.2.2",
+    "bafu": "file:../js-functional",
+    "jest": "^29.3.1",
+    "ts-jest": "^29.0.3",
     "typescript": "^4.8.4"
   }
 }

@@ -1,8 +1,11 @@
-import { reduce } from "js-tools"
-import data from "./data.json"
-import def from "./def.js"
+import { guard, aim } from "bafu"
 
-const o = { a: 1, b: 2, c: 3 }
-console.assert(def.def, "this is defalut")
-console.assert(data.msg, "a message from data")
-console.assert(reduce(o, (acc, v) => acc + v, 0) === 6, "expected 6")
+const isDividedBy = (x, y) => x % y === 0
+expect(isDividedBy(4, 2)).toEqual(true)
+const isDividedBy2 = aim(isDividedBy, 2)
+expect(isDividedBy2(4)).toEqual(true)
+
+const isEven = guard(() => true, isDividedBy2)
+
+expect(isEven(2)).toEqual(true)
+expect(isEven(3)).toEqual(null)

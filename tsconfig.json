@@ -4,7 +4,7 @@
     "outDir": "dist",
     "declaration": true,
     "moduleResolution": "Node",
-    "target": "ES6"
+    "module": "Node16"
   },
   "include": [
     "src"
