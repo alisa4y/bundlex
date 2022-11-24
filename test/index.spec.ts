@@ -91,4 +91,7 @@ describe("impundler", () => {
       }
     )
   })
+  it("can ignore comments", () => {
+    impundler("./test/comment.js", result => {})
+  })
 })

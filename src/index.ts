@@ -3,15 +3,13 @@ import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
 import { readFile, access } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
+const strip = require("strip-comments")
 
 type IOptions = Partial<{
-  minify: boolean
   watch: boolean
+  minify: boolean
 }>
-
 const defaultOptions: IOptions = {
-  // cache: true,
-  minify: false,
   watch: false,
 }
 const genId = (function () {
@@ -79,20 +77,28 @@ interface IFileNode {
 function removeUseStrict(content: string) {
   return content.replace(/[`'"]use strict[`'"];/, "")
 }
+function removeComments(content: string) {
+  return strip(content)
+}
+const JS_Filters = [removeComments, removeUseStrict]
+function filterJS(content: string) {
+  return JS_Filters.reduce((acc, fn) => fn(acc), content)
+}
 async function getFileStats(path: string) {
   const importsString: Set<string> = new Set()
   let exports = ""
   let imports = []
-  let fileData = removeUseStrict(await readFile(path, "utf8"))
-  if (fileData === "") {
+  let content = await readFile(path, "utf8")
+  if (content === "") {
     let count = 10
     while (count--) {
       await timeout(50)
-      fileData = await readFile(path, "utf8")
-      if (fileData !== "") break
+      content = await readFile(path, "utf8")
+      if (content !== "") break
     }
-    if (fileData === "") console.log("file is empty, can't read it", path)
+    if (content === "") throw new Error("file is empty, can't read it" + path)
   }
+  let fileData = filterJS(content)
   let file = fileData
   switch (extname(path)) {
     case ".json":

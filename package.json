@@ -4,7 +4,6 @@
   "description": "very fast in memory javascript bundler",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "test": "jest"
@@ -23,7 +22,8 @@
   "license": "ISC",
   "dependencies": {
     "arep": "file:../js-asyncStringReplacer",
-    "flowco": "file:../js-logic"
+    "flowco": "file:../js-logic",
+    "strip-comments": "^2.0.1"
   },
   "repository": {
     "type": "git",
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@types/jest": "^29.2.2",
+    "@types/strip-comments": "^2.0.1",
     "bafu": "file:../js-functional",
     "jest": "^29.3.1",
     "ts-jest": "^29.0.3",

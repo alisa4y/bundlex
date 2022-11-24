@@ -1,2 +1,2 @@
 import { greet } from "./m2.js"
-          return greet("world")
+        return greet("ali")
