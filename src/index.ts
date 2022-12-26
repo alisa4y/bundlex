@@ -41,9 +41,10 @@ async function figurePath(dir: string, path: string) {
     return path
   } else {
     path = join(await findNodeModules(dir), path)
-    return await readFile(join(path, "package.json"), "utf8").then(json =>
-      join(path, JSON.parse(json).main)
-    )
+    return await readFile(join(path, "package.json"), "utf8").then(json => {
+      const { main, browser, module, unpkg, jsdelivr } = JSON.parse(json)
+      return join(path, main || browser || module || unpkg || jsdelivr)
+    })
   }
 }
 function wrapFile(file: string, exports: string, id: string) {
@@ -52,17 +53,17 @@ function wrapFile(file: string, exports: string, id: string) {
   } \n   ${id}=()=>__exports;  return __exports}`
 }
 const Rgxs = {
-  impFrom: /import\s+(.*)\s+from\s*(?:"|')(.*?)(?:"|')/g,
+  impFrom: /import\s+([\S\s]*?)from\s*(?:"|')(.*?)(?:"|')/g,
   expFrom: /export\s+\*\s+from\s+(?:"|')(.*?)(?:"|')/g,
   exp: /export\s+(?:const|let|var|function)?\s*([^\s(]+)?\s*/g,
-  expB: /export\s*\{(.*)\}/g,
+  expB: /export\s*\{([^}]*)\}/g,
   expDef: /export\s*default\s*/g,
   req: /require\((?:"|'|`)(.*)(?:"|'|`)\)/g,
   exports: /([\s;({[]|^)(?:module\.)?exports/g,
 }
 const impRgx = [
   /\s*\*\s+as\s+(\w+)\s*/y, // import * as name from "path"
-  /\s*\{.*\}\s*/y, // import {name} from "path"
+  /\s*?\{[^}]*\}\s*/y, // import {name} from "path"
   /\s*\w+\s*/y, // import name from "path"
 ]
 interface IFileNode {
@@ -75,7 +76,7 @@ interface IFileNode {
   onChange?: () => void
 }
 function removeUseStrict(content: string) {
-  return content.replace(/[`'"]use strict[`'"];/, "")
+  return content.replace(/[`'"]use strict[`'"];?/, "")
 }
 function removeComments(content: string) {
   return strip(content)

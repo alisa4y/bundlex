@@ -91,7 +91,21 @@ describe("impundler", () => {
       }
     )
   })
-  it("can ignore comments", () => {
-    impundler("./test/comment.js", result => {})
+  it("can ignore comments", done => {
+    impundler("./test/comment.js", result => {
+      eval(result)
+      done()
+    })
+  })
+  it("can bundle browser module for example js-cookie", done => {
+    impundler("./test/js-cookie.js", result => {
+      done()
+    })
+  })
+  it("test multilen import to bundleu", done => {
+    impundler("./test/multiLine.js", result => {
+      eval(result)
+      done()
+    })
   })
 })
