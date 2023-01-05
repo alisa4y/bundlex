@@ -108,4 +108,10 @@ describe("impundler", () => {
       done()
     })
   })
+  it("can bundle typescript too", done => {
+    impundler("./test/tsModules/m2.ts", result => {
+      eval(result)
+      done()
+    })
+  })
 })

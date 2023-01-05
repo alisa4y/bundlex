@@ -3,6 +3,7 @@ import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
 import { readFile, access } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
+import * as ts from "typescript"
 const strip = require("strip-comments")
 
 type IOptions = Partial<{
@@ -34,7 +35,14 @@ async function findNodeModules(dir: string): Promise<string> {
 async function figurePath(dir: string, path: string) {
   if (path[0] === ".") {
     path = join(dir, path)
-    if (extname(path) === "") path += ".js"
+    if (extname(path) === "") {
+      try {
+        await access(path + ".ts")
+        path += ".ts"
+      } catch {
+        path += ".js"
+      }
+    }
     return path
   } else if (path[0] === "/") {
     path = join(process.cwd(), path)
@@ -89,16 +97,7 @@ async function getFileStats(path: string) {
   const importsString: Set<string> = new Set()
   let exports = ""
   let imports = []
-  let content = await readFile(path, "utf8")
-  if (content === "") {
-    let count = 10
-    while (count--) {
-      await timeout(50)
-      content = await readFile(path, "utf8")
-      if (content !== "") break
-    }
-    if (content === "") throw new Error("file is empty, can't read it" + path)
-  }
+  const content = await getFileContent(path)
   let fileData = filterJS(content)
   let file = fileData
   switch (extname(path)) {
@@ -192,6 +191,26 @@ async function getFileStats(path: string) {
   return {
     content: wrapFile(file, exports, ids[path]),
     imports,
+  }
+}
+async function getFileContent(filePath: string, count = 10): Promise<string> {
+  if (count === 0)
+    throw new Error("file is empty or can't read it:\n\t" + filePath)
+  const content = await readFile(filePath, "utf-8")
+  if (content === "") {
+    await timeout(50)
+    return getFileContent(filePath, count - 1)
+  }
+  switch (extname(filePath)) {
+    case ".js":
+    case ".json":
+      return content
+    case ".ts":
+      return ts.transpileModule(content, {
+        compilerOptions: { module: ts.ModuleKind.Node16 },
+      }).outputText
+    default:
+      throw new Error(`not supported format: "${extname(filePath)}"`)
   }
 }
 async function transformFile(path: string): Promise<IFileNode> {
