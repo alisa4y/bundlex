@@ -1,7 +1,7 @@
 import { shield, factory, timeout } from "flowco"
 import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
-import { readFile, access } from "fs/promises"
+import { readFile, access, readdir } from "fs/promises"
 import { basename, dirname, extname, join } from "path"
 import * as ts from "typescript"
 const strip = require("strip-comments")
@@ -9,6 +9,7 @@ const strip = require("strip-comments")
 type IOptions = Partial<{
   watch: boolean
   minify: boolean
+  plugins: Record<any, (code: string, filename: string) => string>
 }>
 const defaultOptions: IOptions = {
   watch: false,
@@ -32,33 +33,49 @@ async function findNodeModules(dir: string): Promise<string> {
     }
   }
 }
+
+async function findAPath(path: string) {
+  const bn = basename(path)
+  const dir = dirname(path)
+  const files = await readdir(dir)
+  const found = files.find(f => f.startsWith(bn))
+  if (!found) throw new Error(`path at "${path}" not exist`)
+  if (extname(found) === "") {
+    const childFiles = await readdir(path)
+    const indexFile = childFiles.find(f => f.startsWith("index"))
+    if (!indexFile)
+      throw new Error(
+        'folder at "' + path + '" does not have any index file to import'
+      )
+    return join(path, indexFile)
+  }
+  return join(dir, found)
+}
 async function figurePath(dir: string, path: string) {
-  if (path[0] === ".") {
-    path = join(dir, path)
-    if (extname(path) === "") {
+  switch (path[0]) {
+    case ".":
+      path = join(dir, path)
+      return findAPath(path)
+    case "/":
+      path = join(process.cwd(), path)
+      return findAPath(path)
+    default:
+      path = join(await findNodeModules(dir), path)
       try {
-        await access(path + ".ts")
-        path += ".ts"
-      } catch {
-        path += ".js"
+        return await readFile(join(path, "package.json"), "utf8").then(json => {
+          const { main, browser, module, unpkg, jsdelivr } = JSON.parse(json)
+          return findAPath(
+            join(path, main || browser || module || unpkg || jsdelivr)
+          )
+        })
+      } catch (e) {
+        return null
       }
-    }
-    return path
-  } else if (path[0] === "/") {
-    path = join(process.cwd(), path)
-    return path
-  } else {
-    path = join(await findNodeModules(dir), path)
-    return await readFile(join(path, "package.json"), "utf8").then(json => {
-      const { main, browser, module, unpkg, jsdelivr } = JSON.parse(json)
-      return join(path, main || browser || module || unpkg || jsdelivr)
-    })
   }
 }
 function wrapFile(file: string, exports: string, id: string) {
-  return `function(__exports={}, module={}) {${
-    file + "\n" + exports
-  } \n   ${id}=()=>__exports;  return __exports}`
+  return `function(__exports={}, module={}) {\n ${id}=()=>__exports;
+  ${file + "\n" + exports} return __exports}`
 }
 const Rgxs = {
   impFrom: /import\s+([\S\s]*?)from\s*(?:"|')(.*?)(?:"|')/g,
@@ -82,6 +99,10 @@ interface IFileNode {
   usedBy: Set<IFileNode>
   watcher?: ReturnType<typeof watch>
   onChange?: () => void
+  loadingStats: Promise<{
+    content: string
+    imports: IFileNode[]
+  }>
 }
 function removeUseStrict(content: string) {
   return content.replace(/[`'"]use strict[`'"];?/, "")
@@ -93,14 +114,15 @@ const JS_Filters = [removeComments, removeUseStrict]
 function filterJS(content: string) {
   return JS_Filters.reduce((acc, fn) => fn(acc), content)
 }
-async function getFileStats(path: string) {
+async function getFileStats(path: string, options: IOptions) {
   const importsString: Set<string> = new Set()
   let exports = ""
   let imports = []
-  const content = await getFileContent(path)
+  const content = await getFileContent(path, options.plugins)
   let fileData = filterJS(content)
   let file = fileData
-  switch (extname(path)) {
+  const ext = extname(path)
+  switch (ext) {
     case ".json":
       fileData = `export default ${fileData}`
     default:
@@ -109,6 +131,7 @@ async function getFileStats(path: string) {
           regexp: Rgxs.impFrom,
           callback: async (m, ims, p) => {
             const imPath = await figurePath(dirname(path), p)
+            if (imPath === null) return m
             importsString.add(imPath)
             let strIndex = 0
             let ret = ""
@@ -146,6 +169,7 @@ async function getFileStats(path: string) {
           regexp: Rgxs.expFrom,
           callback: async (m, p) => {
             const imPath = await figurePath(dirname(path), p)
+            if (imPath === null) return m
             importsString.add(imPath)
             const name = basename(p, ".js")
             exports += `Object.assign(__exports,${name});`
@@ -175,6 +199,7 @@ async function getFileStats(path: string) {
           regexp: Rgxs.req,
           callback: async (m, p) => {
             const imPath = await figurePath(dirname(path), p)
+            if (imPath === null) return m
             importsString.add(imPath)
             return `${ids[imPath]}()\n`
           },
@@ -184,64 +209,112 @@ async function getFileStats(path: string) {
           callback: (m, g) => (g ? g : "") + "__exports",
         },
       ])
-      imports = await Promise.all(
-        [...importsString].map(imPath => files[imPath])
-      )
+      imports = [...importsString].map(imPath => getFile(imPath, options))
   }
   return {
     content: wrapFile(file, exports, ids[path]),
     imports,
   }
 }
-async function getFileContent(filePath: string, count = 10): Promise<string> {
+async function getFileContent(
+  filePath: string,
+  plugins?: IOptions["plugins"],
+  count = 10
+): Promise<string> {
   if (count === 0)
     throw new Error("file is empty or can't read it:\n\t" + filePath)
   const content = await readFile(filePath, "utf-8")
   if (content === "") {
     await timeout(50)
-    return getFileContent(filePath, count - 1)
+    return getFileContent(filePath, plugins, count - 1)
   }
-  switch (extname(filePath)) {
+  const ext = extname(filePath)
+  const pluginHandler = plugins?.[ext]
+  if (pluginHandler) {
+    return pluginHandler(content, basename(filePath))
+  }
+  switch (ext) {
     case ".js":
     case ".json":
       return content
     case ".ts":
-      return ts.transpileModule(content, {
-        compilerOptions: { module: ts.ModuleKind.Node16 },
-      }).outputText
+      return ts.transpile(content, {
+        module: ts.ModuleKind.Node16,
+        removeComments: true,
+      })
     default:
       throw new Error(`not supported format: "${extname(filePath)}"`)
   }
 }
-async function transformFile(path: string): Promise<IFileNode> {
-  const { imports, content } = await getFileStats(path)
+function transformFile(path: string, options: IOptions): IFileNode {
   const obj: IFileNode = {
     id: ids[path],
     path,
-    imports,
-    content,
+    imports: [],
+    content: "",
     usedBy: new Set(),
+    loadingStats: getFileStats(path, options),
   }
-  imports.forEach(o => o.usedBy.add(obj))
+  obj.loadingStats
+    .then(stats => {
+      Object.assign(obj, stats)
+      stats.imports.forEach(o => o.usedBy.add(obj))
+    })
+    .catch(e => {
+      if (options.watch) {
+        console.log(e)
+      } else throw e
+    })
   return obj
 }
-const files = factory(transformFile)
-
-function getAllImports(imports: IFileNode[]): Set<IFileNode> {
-  return new Set([
-    ...imports,
-    ...imports.map(({ imports }) => [...getAllImports(imports)]).flat(),
-  ])
+const files: Record<string, IFileNode> = {}
+function getFile(path: string, options: IOptions) {
+  return files[path] || (files[path] = transformFile(path, options))
 }
-
-function bundle({ imports, content, id }: IFileNode) {
+async function onReady(
+  node: IFileNode,
+  ancestorsPaths: Set<IFileNode> = new Set()
+) {
+  await node.loadingStats
+  ancestorsPaths.add(node)
+  await Promise.all(
+    node.imports
+      .filter(i => !ancestorsPaths.has(i))
+      .map(i => onReady(i, ancestorsPaths))
+  )
+}
+function getAllImports(
+  imports: IFileNode[],
+  ancestorsNode: Set<IFileNode>
+): IFileNode[] {
+  for (const n of imports) ancestorsNode.add(n)
+  return [
+    ...imports,
+    ...imports
+      .map(({ imports }) =>
+        getAllImports(
+          imports.filter(i => {
+            if (!ancestorsNode.has(i)) {
+              ancestorsNode.add(i)
+              return true
+            }
+            return false
+          }),
+          ancestorsNode
+        )
+      )
+      .flat(),
+  ]
+}
+function bundle(node: IFileNode) {
+  const { imports, content, id } = node
   return (
-    [...getAllImports(imports)]
+    getAllImports(imports, new Set([node]))
       .map(v => `let ${v.id} = ${v.content}`)
       .join("\n") + `\nlet ${id};(${content})()`
   )
 }
-type ImHandler = (result: string, bundle?: Bundle) => void
+type ImHandler = (result: string, bundle: Bundle) => void
 export async function impundler(
   path: string,
   options: IOptions | ImHandler,
@@ -251,19 +324,23 @@ export async function impundler(
     onChange = options
   }
   options = { ...defaultOptions, ...options }
-  const entry = await files[path]
-  onChange(bundle(entry))
+  path = await findAPath(path)
+  if (path === null) throw new Error("couldn't locate path: " + path)
+  const entry = getFile(path, options)
+  await onReady(entry)
+  const bundleInstance = new Bundle(entry)
+  await onChange(bundle(entry), bundleInstance)
   if (options.watch) {
     entry.onChange = () => {
       onChange(bundle(entry), new Bundle(entry))
     }
-    watchAllImports(entry)
+    watchAllImports(entry, options)
   }
-  return entry
+  return bundleInstance
 }
-function watchAllImports(o: IFileNode) {
-  watchImport(o)
-  o.imports.forEach(watchAllImports)
+function watchAllImports(o: IFileNode, options: IOptions) {
+  watchNode(o, options)
+  o.imports.forEach(imo => watchAllImports(imo, options))
 }
 function updateOwners(im: IFileNode) {
   im.usedBy.forEach(p => {
@@ -272,32 +349,60 @@ function updateOwners(im: IFileNode) {
   })
 }
 
-const handleChange = shield(async (im: IFileNode) => {
-  im.imports.forEach(o => o.usedBy.delete(im))
-  Object.assign(im, await getFileStats(im.path))
-  im.imports.forEach(o => o.usedBy.add(im))
-  watchAllImports(im)
-  im.onChange?.()
-  updateOwners(im)
+const handleChange = shield(async (node: IFileNode, options: IOptions) => {
+  node.imports.forEach(o => o.usedBy.delete(node))
+  try {
+    Object.assign(node, await getFileStats(node.path, options))
+  } catch (e) {
+    if (e.code === "ENOENT") {
+      deleteNode(node)
+    } else {
+      console.clear()
+      return console.log(e)
+    }
+  }
+  node.imports.forEach(o => o.usedBy.add(node))
+  watchAllImports(node, options)
+  if (node.onChange) {
+    onReady(node).then(() => {
+      node.onChange()
+    })
+  }
+  updateOwners(node)
 }, 200)
 
-function watchImport(im: IFileNode) {
-  im.watcher ??= watch(
-    im.path,
-    eventType => eventType === "change" && handleChange(im)
-  )
+function watchNode(node: IFileNode, options: IOptions) {
+  node.watcher ??= watch(node.path, eventType => handleChange(node, options))
 }
 
 class Bundle {
-  bundle: IFileNode
+  node: IFileNode
   constructor(b: IFileNode) {
-    this.bundle = b
+    this.node = b
   }
-  close() {
-    closeWatcher(this.bundle)
+  closeWatcher() {
+    closeWatcher(this.node)
   }
+  unhandle() {
+    this.node.onChange = undefined
+  }
+}
+export function closeAllBundles() {
+  Object.values(files).forEach(n => n.watcher.close())
 }
 function closeWatcher(o: IFileNode) {
   o.watcher?.close()
   o.imports.forEach(closeWatcher)
+}
+function deleteNode(node: IFileNode) {
+  node.imports.forEach(imNode => {
+    imNode.usedBy.delete(node)
+    if (imNode.usedBy.size === 0 && imNode.onChange === undefined) {
+    }
+  })
+  node.usedBy.forEach(u =>
+    u.imports.splice(u.imports.findIndex(v => v === node))
+  )
+  node.watcher?.close()
+  delete files[node.path]
 }

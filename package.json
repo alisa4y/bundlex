@@ -38,6 +38,7 @@
     "bafu": "file:../js-functional",
     "jest": "^29.3.1",
     "js-cookie": "^3.0.1",
+    "jsx_transpiler": "file:../jsx-transpiler",
     "ts-jest": "^29.0.3"
   }
 }

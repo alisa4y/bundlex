@@ -1,6 +1,7 @@
 import { impundler } from "../src"
 import { writeFile } from "fs/promises"
 import { timeout } from "flowco"
+import { transpileJSX } from "jsx_transpiler"
 
 const expected = [
   "hello world",
@@ -85,7 +86,7 @@ describe("impundler", () => {
         await timeout(350) // the watcher wont execute for 200ms
         changes[index++]?.()
         if (index === changes.length) {
-          bundle?.close()
+          bundle?.closeWatcher()
           done()
         }
       }
@@ -113,5 +114,49 @@ describe("impundler", () => {
       eval(result)
       done()
     })
+  })
+  it("can import folder by importing its index file", done => {
+    impundler("./test/indexImport.ts", result => {
+      const { doingAdd } = eval(result)
+      expect(doingAdd).toEqual("2 + 4 = 6")
+      done()
+    })
+  })
+  it("if a module is not found it will leave it as it is and consider it to be a native module", done => {
+    impundler("./test/native.js", code => {
+      const getCookie = eval(code)
+      expect(getCookie().replaceAll(/\r?\n/g, "")).toEqual(
+        `import Cookies from "js-cookie"Cookies.set`
+      )
+      done()
+    })
+  })
+  it("can handle circular dependency", done => {
+    impundler("./test/circular_dependency/a.js", code => {
+      const { a } = eval(code)
+      expect(a).toEqual("AB")
+      done()
+    })
+  })
+})
+describe("passing plugins", () => {
+  it("giving jsx plugin", done => {
+    impundler(
+      "./test/jsx",
+      {
+        plugins: {
+          ".jsx": code => transpileJSX(code),
+        },
+      },
+      code => {
+        const { App } = eval(code)
+        expect(App({ fname: "ali", lname: "safari" })).toEqual(`<main>
+      <h1>
+      greetings ali safari
+    </h1>
+    </main>`)
+        done()
+      }
+    )
   })
 })
