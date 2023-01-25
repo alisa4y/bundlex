@@ -1,10 +1,10 @@
 import { shield, factory, timeout } from "flowco"
 import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
-import { readFile, access, readdir } from "fs/promises"
-import { basename, dirname, extname, join } from "path"
-import * as ts from "typescript"
-const strip = require("strip-comments")
+import { readFile, access, readdir, stat } from "fs/promises"
+import { basename, dirname, extname, join, parse } from "path"
+import ts from "typescript"
+import { delete_comments } from "delete_comments"
 
 type IOptions = Partial<{
   watch: boolean
@@ -33,58 +33,78 @@ async function findNodeModules(dir: string): Promise<string> {
     }
   }
 }
+async function findFile(path: string) {
+  try {
+    const name = basename(path)
+    const dir = dirname(path)
+    const files = await readdir(dir)
+    const found = files.find(
+      f =>
+        f.startsWith(name) &&
+        parse(f).name.length - name.length <= 0 &&
+        !f.endsWith(".d.ts")
+    )
+    if (!found) return null
 
-async function findAPath(path: string) {
-  const bn = basename(path)
-  const dir = dirname(path)
-  const files = await readdir(dir)
-  const found = files.find(f => f.startsWith(bn))
-  if (!found) throw new Error(`path at "${path}" not exist`)
-  if (extname(found) === "") {
-    const childFiles = await readdir(path)
-    const indexFile = childFiles.find(f => f.startsWith("index"))
-    if (!indexFile)
-      throw new Error(
-        'folder at "' + path + '" does not have any index file to import'
+    const possibleFile = join(dir, found)
+    if ((await stat(possibleFile)).isDirectory()) {
+      if (name !== found) return null // means same start name but different folders
+      const childFiles = await readdir(path)
+      const indexFile = childFiles.find(
+        f => parse(f).name === "index" && !f.endsWith(".d.ts")
       )
-    return join(path, indexFile)
+
+      if (indexFile) return join(path, indexFile)
+
+      const { main, browser, module, unpkg, jsdelivr } = await readFile(
+        join(possibleFile, "package.json"),
+        "utf8"
+      )
+        .then(JSON.parse)
+        .catch(e => ({}))
+
+      const entry = main || browser || module || unpkg || jsdelivr
+      if (entry === undefined) {
+        console.warn(
+          "no index or entry in package.json found for giving path: " + path
+        )
+        return null
+      }
+      return join(possibleFile, entry)
+    }
+    return possibleFile
+  } catch (e) {
+    return null
   }
-  return join(dir, found)
 }
 async function figurePath(dir: string, path: string) {
   switch (path[0]) {
     case ".":
       path = join(dir, path)
-      return findAPath(path)
+      return findFile(path)
     case "/":
       path = join(process.cwd(), path)
-      return findAPath(path)
+      return findFile(path)
     default:
       path = join(await findNodeModules(dir), path)
-      try {
-        return await readFile(join(path, "package.json"), "utf8").then(json => {
-          const { main, browser, module, unpkg, jsdelivr } = JSON.parse(json)
-          return findAPath(
-            join(path, main || browser || module || unpkg || jsdelivr)
-          )
-        })
-      } catch (e) {
-        return null
-      }
+      return findFile(path)
   }
 }
 function wrapFile(file: string, exports: string, id: string) {
-  return `function(__exports={}, module={}) {\n ${id}=()=>__exports;
-  ${file + "\n" + exports} return __exports}`
+  return `function(module={exports:{}}) {\nlet exports = module.exports;\n ${id}=()=> module.exports;
+  ${file + "\n" + exports} return module.exports}`
 }
 const Rgxs = {
+  quote: /'.*?(?:[^\\]|(?<=\\).)'/g,
+  doubleQuote: /".*?(?:[^\\]|(?<=\\).)"/g,
+  tilde: /`.*?(?:[^\\]|(?<=\\).)`/g,
   impFrom: /import\s+([\S\s]*?)from\s*(?:"|')(.*?)(?:"|')/g,
   expFrom: /export\s+\*\s+from\s+(?:"|')(.*?)(?:"|')/g,
-  exp: /export\s+(?:const|let|var|function)?\s*([^\s(]+)?\s*/g,
-  expB: /export\s*\{([^}]*)\}/g,
-  expDef: /export\s*default\s*/g,
+  exp: /(?:[\s]|^)export\s+(?:const|let|var|function)?\s*([^\s(]+)?\s*/g,
+  expB: /(?:[\s]|^)export\s*\{([^}]*)\}/g,
+  expDef: /(?:[\s]|^)export\s*default\s*/g,
   req: /require\((?:"|'|`)(.*)(?:"|'|`)\)/g,
-  exports: /([\s;({[]|^)(?:module\.)?exports/g,
+  // exports: /([\s;({[]|^)(?:module\.)?exports/g,
 }
 const impRgx = [
   /\s*\*\s+as\s+(\w+)\s*/y, // import * as name from "path"
@@ -107,10 +127,7 @@ interface IFileNode {
 function removeUseStrict(content: string) {
   return content.replace(/[`'"]use strict[`'"];?/, "")
 }
-function removeComments(content: string) {
-  return strip(content)
-}
-const JS_Filters = [removeComments, removeUseStrict]
+const JS_Filters = [removeUseStrict, delete_comments]
 function filterJS(content: string) {
   return JS_Filters.reduce((acc, fn) => fn(acc), content)
 }
@@ -121,98 +138,106 @@ async function getFileStats(path: string, options: IOptions) {
   const content = await getFileContent(path, options.plugins)
   let fileData = filterJS(content)
   let file = fileData
-  const ext = extname(path)
-  switch (ext) {
-    case ".json":
-      fileData = `export default ${fileData}`
-    default:
-      file = await asyncReplaceMultiPattern(fileData, [
-        {
-          regexp: Rgxs.impFrom,
-          callback: async (m, ims, p) => {
-            const imPath = await figurePath(dirname(path), p)
-            if (imPath === null) return m
-            importsString.add(imPath)
-            let strIndex = 0
-            let ret = ""
-            const handlers = [
-              (m: string, name: string) =>
-                (ret += `const ${name} = ${ids[imPath]}()\n`),
-              (m: string) =>
-                (ret += `const ${m.replace("as", ":")} = ${ids[imPath]}()\n`),
-              (m: string) => (ret += `const ${m} = ${ids[imPath]}().default\n`),
-            ]
-            while (strIndex < ims.length) {
-              impRgx.some((r, i) => {
-                r.lastIndex = strIndex
-                const retExec = r.exec(ims)
-                if (retExec) {
-                  handlers[i].apply(null, retExec)
-                  strIndex = r.lastIndex
-                  return true
-                }
-                return false
-              })
-              if (ims[strIndex] === ",") strIndex++
-              else break
+  file = await asyncReplaceMultiPattern(fileData, [
+    {
+      regexp: Rgxs.impFrom,
+      callback: async (m, ims, p) => {
+        const imPath = await figurePath(dirname(path), p)
+        if (imPath === null) return m
+        importsString.add(imPath)
+        let strIndex = 0
+        let ret = ""
+        const handlers = [
+          (m: string, name: string) =>
+            (ret += `const ${name} = ${ids[imPath]}()\n`),
+          (m: string) =>
+            (ret += `const ${m.replace("as", ":")} = ${ids[imPath]}()\n`),
+          (m: string) => (ret += `const ${m} = ${ids[imPath]}().default\n`),
+        ]
+        while (strIndex < ims.length) {
+          impRgx.some((r, i) => {
+            r.lastIndex = strIndex
+            const retExec = r.exec(ims)
+            if (retExec) {
+              handlers[i].apply(null, retExec)
+              strIndex = r.lastIndex
+              return true
             }
-            return ret
-          },
-        },
-        {
-          regexp: Rgxs.expDef,
-          callback: m => {
-            return "__exports.default ="
-          },
-        },
-        {
-          regexp: Rgxs.expFrom,
-          callback: async (m, p) => {
-            const imPath = await figurePath(dirname(path), p)
-            if (imPath === null) return m
-            importsString.add(imPath)
-            const name = basename(p, ".js")
-            exports += `Object.assign(__exports,${name});`
-            return `const ${name} = ${ids[imPath]}()\n`
-          },
-        },
-        {
-          regexp: Rgxs.exp,
-          callback: (m, name) => {
-            if (name === "*") return m
-            exports += `__exports.${name} = ${name};`
-            return m.slice(7)
-          },
-        },
-        {
-          regexp: Rgxs.expB,
-          callback: (m, p) => {
-            const exs = p.split(",")
-            exs.forEach(ex => {
-              let [name, nick] = ex.trim().split("as")
-              exports += `__exports.${nick} = ${name};`
-            })
-            return ""
-          },
-        },
-        {
-          regexp: Rgxs.req,
-          callback: async (m, p) => {
-            const imPath = await figurePath(dirname(path), p)
-            if (imPath === null) return m
-            importsString.add(imPath)
-            return `${ids[imPath]}()\n`
-          },
-        },
-        {
-          regexp: Rgxs.exports,
-          callback: (m, g) => (g ? g : "") + "__exports",
-        },
-      ])
-      imports = [...importsString].map(imPath => getFile(imPath, options))
-  }
+            return false
+          })
+          if (ims[strIndex] === ",") strIndex++
+          else break
+        }
+        return ret
+      },
+    },
+
+    {
+      regexp: Rgxs.req,
+      callback: async (m, p) => {
+        const imPath = await figurePath(dirname(path), p)
+        if (imPath === null) return m
+        importsString.add(imPath)
+        return `${ids[imPath]}()\n`
+      },
+    },
+    {
+      regexp: Rgxs.expFrom,
+      callback: async (m, p) => {
+        const imPath = await figurePath(dirname(path), p)
+        if (imPath === null) return m
+        importsString.add(imPath)
+        const name = basename(p, ".js")
+        exports += `Object.assign(exports,${name});`
+        return `const ${name} = ${ids[imPath]}()\n`
+      },
+    },
+    {
+      regexp: Rgxs.quote,
+      callback: async m => m,
+    },
+    {
+      regexp: Rgxs.doubleQuote,
+      callback: async m => m,
+    },
+    {
+      regexp: Rgxs.tilde,
+      callback: async m => m,
+    },
+    {
+      regexp: Rgxs.expDef,
+      callback: m => {
+        return "exports.default ="
+      },
+    },
+
+    {
+      regexp: Rgxs.exp,
+      callback: (m, name) => {
+        if (name === "*") return m
+        exports += `exports.${name} = ${name};`
+        return m.slice(7)
+      },
+    },
+    {
+      regexp: Rgxs.expB,
+      callback: (m, p) => {
+        const exs = p.split(",")
+        exs.forEach(ex => {
+          let [name, nick] = ex.trim().split("as")
+          exports += `exports.${nick} = ${name};`
+        })
+        return ""
+      },
+    },
+    // {
+    //   regexp: Rgxs.exports,
+    //   callback: (m, g) => (g ? g : "") + "exports",
+    // },
+  ])
+  imports = [...importsString].map(imPath => getFile(imPath, options))
   return {
-    content: wrapFile(file, exports, ids[path]),
+    content: `//${path}\n` + wrapFile(file, exports, ids[path]),
     imports,
   }
 }
@@ -235,12 +260,14 @@ async function getFileContent(
   }
   switch (ext) {
     case ".js":
-    case ".json":
       return content
+    case ".json":
+      return `export default ${content}`
     case ".ts":
       return ts.transpile(content, {
         module: ts.ModuleKind.Node16,
         removeComments: true,
+        esModuleInterop: true,
       })
     default:
       throw new Error(`not supported format: "${extname(filePath)}"`)
@@ -261,9 +288,7 @@ function transformFile(path: string, options: IOptions): IFileNode {
       stats.imports.forEach(o => o.usedBy.add(obj))
     })
     .catch(e => {
-      if (options.watch) {
-        console.log(e)
-      } else throw e
+      handleFileStatsError(e, obj)
     })
   return obj
 }
@@ -324,7 +349,7 @@ export async function impundler(
     onChange = options
   }
   options = { ...defaultOptions, ...options }
-  path = await findAPath(path)
+  path = await findFile(path)
   if (path === null) throw new Error("couldn't locate path: " + path)
   const entry = getFile(path, options)
   await onReady(entry)
@@ -338,9 +363,15 @@ export async function impundler(
   }
   return bundleInstance
 }
-function watchAllImports(o: IFileNode, options: IOptions) {
+function watchAllImports(
+  o: IFileNode,
+  options: IOptions,
+  seenNodes: Set<IFileNode> = new Set()
+) {
+  if (seenNodes.has(o)) return
+  seenNodes.add(o)
   watchNode(o, options)
-  o.imports.forEach(imo => watchAllImports(imo, options))
+  o.imports.forEach(imo => watchAllImports(imo, options, seenNodes))
 }
 function updateOwners(im: IFileNode) {
   im.usedBy.forEach(p => {
@@ -348,18 +379,21 @@ function updateOwners(im: IFileNode) {
     updateOwners(p)
   })
 }
-
+function handleFileStatsError(e: any, node: IFileNode) {
+  console.warn("failed to evaluate file at: " + node.path)
+  if (e.code === "ENOENT") {
+    deleteNode(node)
+  } else {
+    console.clear()
+    return console.log(e)
+  }
+}
 const handleChange = shield(async (node: IFileNode, options: IOptions) => {
   node.imports.forEach(o => o.usedBy.delete(node))
   try {
     Object.assign(node, await getFileStats(node.path, options))
   } catch (e) {
-    if (e.code === "ENOENT") {
-      deleteNode(node)
-    } else {
-      console.clear()
-      return console.log(e)
-    }
+    return handleFileStatsError(e, node)
   }
   node.imports.forEach(o => o.usedBy.add(node))
   watchAllImports(node, options)
@@ -372,7 +406,7 @@ const handleChange = shield(async (node: IFileNode, options: IOptions) => {
 }, 200)
 
 function watchNode(node: IFileNode, options: IOptions) {
-  node.watcher ??= watch(node.path, eventType => handleChange(node, options))
+  node.watcher ??= watch(node.path, () => handleChange(node, options))
 }
 
 class Bundle {
@@ -388,7 +422,7 @@ class Bundle {
   }
 }
 export function closeAllBundles() {
-  Object.values(files).forEach(n => n.watcher.close())
+  Object.values(files).forEach(n => n.watcher?.close())
 }
 function closeWatcher(o: IFileNode) {
   o.watcher?.close()

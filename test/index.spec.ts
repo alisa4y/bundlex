@@ -47,6 +47,17 @@ describe("impundler", () => {
       eval(result)
     })
   })
+  it("returns module.exports in bundling ", () => {
+    impundler("./test/common/m.js", result => {
+      const exp = eval(result)
+      expect(exp.data).toEqual("data of m.js")
+    })
+  })
+  it("caches module.exports for future usages", () => {
+    impundler("./test/common/m2.js", result => {
+      eval(result)
+    })
+  })
   it("can bundle from node_modules", () => {
     impundler("./test/modules/m3.js", result => {
       eval(result)
@@ -158,5 +169,13 @@ describe("passing plugins", () => {
         done()
       }
     )
+  })
+})
+describe("fixing some bugs on real life projectsu", () => {
+  it("bundle correctly", done => {
+    impundler("./test/quote.js", code => {
+      eval(code)
+      done()
+    })
   })
 })
