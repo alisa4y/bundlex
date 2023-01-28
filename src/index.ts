@@ -1,4 +1,4 @@
-import { shield, factory, timeout } from "flowco"
+import { factory, timeout, debounce } from "vaco"
 import { asyncReplaceMultiPattern } from "arep"
 import { watch } from "fs"
 import { readFile, access, readdir, stat } from "fs/promises"
@@ -7,12 +7,14 @@ import ts from "typescript"
 import { delete_comments } from "delete_comments"
 
 type IOptions = Partial<{
+  bundleNodeModules: boolean
   watch: boolean
   minify: boolean
   plugins: Record<any, (code: string, filename: string) => string>
 }>
 const defaultOptions: IOptions = {
   watch: false,
+  bundleNodeModules: true,
 }
 const genId = (function () {
   let i = 0
@@ -77,7 +79,7 @@ async function findFile(path: string) {
     return null
   }
 }
-async function figurePath(dir: string, path: string) {
+async function figurePath(dir: string, path: string, options: IOptions) {
   switch (path[0]) {
     case ".":
       path = join(dir, path)
@@ -86,8 +88,9 @@ async function figurePath(dir: string, path: string) {
       path = join(process.cwd(), path)
       return findFile(path)
     default:
-      path = join(await findNodeModules(dir), path)
-      return findFile(path)
+      if (options.bundleNodeModules)
+        return findFile(join(await findNodeModules(dir), path))
+      return null
   }
 }
 function wrapFile(file: string, exports: string, id: string) {
@@ -142,7 +145,7 @@ async function getFileStats(path: string, options: IOptions) {
     {
       regexp: Rgxs.impFrom,
       callback: async (m, ims, p) => {
-        const imPath = await figurePath(dirname(path), p)
+        const imPath = await figurePath(dirname(path), p, options)
         if (imPath === null) return m
         importsString.add(imPath)
         let strIndex = 0
@@ -175,7 +178,7 @@ async function getFileStats(path: string, options: IOptions) {
     {
       regexp: Rgxs.req,
       callback: async (m, p) => {
-        const imPath = await figurePath(dirname(path), p)
+        const imPath = await figurePath(dirname(path), p, options)
         if (imPath === null) return m
         importsString.add(imPath)
         return `${ids[imPath]}()\n`
@@ -184,7 +187,7 @@ async function getFileStats(path: string, options: IOptions) {
     {
       regexp: Rgxs.expFrom,
       callback: async (m, p) => {
-        const imPath = await figurePath(dirname(path), p)
+        const imPath = await figurePath(dirname(path), p, options)
         if (imPath === null) return m
         importsString.add(imPath)
         const name = basename(p, ".js")
@@ -388,7 +391,7 @@ function handleFileStatsError(e: any, node: IFileNode) {
     return console.log(e)
   }
 }
-const handleChange = shield(async (node: IFileNode, options: IOptions) => {
+const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
   node.imports.forEach(o => o.usedBy.delete(node))
   try {
     Object.assign(node, await getFileStats(node.path, options))
@@ -403,7 +406,7 @@ const handleChange = shield(async (node: IFileNode, options: IOptions) => {
     })
   }
   updateOwners(node)
-}, 200)
+}, 100)
 
 function watchNode(node: IFileNode, options: IOptions) {
   node.watcher ??= watch(node.path, () => handleChange(node, options))

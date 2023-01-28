@@ -1,7 +1,7 @@
 import { impundler } from "../src"
 import { writeFile } from "fs/promises"
-import { timeout } from "flowco"
-import { transpileJSX } from "jsx_transpiler"
+import { timeout } from "vaco"
+import { transpileJSX } from "jsxpiler"
 
 const expected = [
   "hello world",
