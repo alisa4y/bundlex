@@ -338,7 +338,6 @@ function bundle(node: IFileNode) {
   )
 }
 type ImHandler = (result: string, bundle: Bundle) => void
-// TODO: make global onchange method to each file :  (content, filename)
 export async function impundler(
   path: string,
   options: IOptions | ImHandler,
