@@ -9,6 +9,7 @@ import { delete_comments } from "delete_comments"
 type IOptions = Partial<{
   bundleNodeModules: boolean
   watch: boolean
+  onFileInvalidated: (filename: string, content: string) => void
   minify: boolean
   plugins: Record<any, (code: string, filename: string) => string>
 }>
@@ -82,15 +83,12 @@ async function findFile(path: string) {
 async function figurePath(dir: string, path: string, options: IOptions) {
   switch (path[0]) {
     case ".":
-      path = join(dir, path)
-      return findFile(path)
+      return findFile(join(dir, path))
     case "/":
-      path = join(process.cwd(), path)
-      return findFile(path)
+      return findFile(join(process.cwd(), path))
     default:
-      if (options.bundleNodeModules)
-        return findFile(join(await findNodeModules(dir), path))
-      return null
+      if (options.bundleNodeModules === false) return null
+      return findFile(join(await findNodeModules(dir), path))
   }
 }
 function wrapFile(file: string, exports: string, id: string) {
@@ -107,7 +105,6 @@ const Rgxs = {
   expB: /(?:[\s]|^)export\s*\{([^}]*)\}/g,
   expDef: /(?:[\s]|^)export\s*default\s*/g,
   req: /require\((?:"|'|`)(.*)(?:"|'|`)\)/g,
-  // exports: /([\s;({[]|^)(?:module\.)?exports/g,
 }
 const impRgx = [
   /\s*\*\s+as\s+(\w+)\s*/y, // import * as name from "path"
@@ -122,6 +119,7 @@ interface IFileNode {
   usedBy: Set<IFileNode>
   watcher?: ReturnType<typeof watch>
   onChange?: () => void
+  onChangeListeners: Set<(filename: string, content: string) => void>
   loadingStats: Promise<{
     content: string
     imports: IFileNode[]
@@ -233,10 +231,6 @@ async function getFileStats(path: string, options: IOptions) {
         return ""
       },
     },
-    // {
-    //   regexp: Rgxs.exports,
-    //   callback: (m, g) => (g ? g : "") + "exports",
-    // },
   ])
   imports = [...importsString].map(imPath => getFile(imPath, options))
   return {
@@ -283,6 +277,7 @@ function transformFile(path: string, options: IOptions): IFileNode {
     imports: [],
     content: "",
     usedBy: new Set(),
+    onChangeListeners: new Set(),
     loadingStats: getFileStats(path, options),
   }
   obj.loadingStats
@@ -343,6 +338,7 @@ function bundle(node: IFileNode) {
   )
 }
 type ImHandler = (result: string, bundle: Bundle) => void
+// TODO: make global onchange method to each file :  (content, filename)
 export async function impundler(
   path: string,
   options: IOptions | ImHandler,
@@ -352,19 +348,28 @@ export async function impundler(
     onChange = options
   }
   options = { ...defaultOptions, ...options }
-  path = await findFile(path)
-  if (path === null) throw new Error("couldn't locate path: " + path)
-  const entry = getFile(path, options)
+  const absPath = await findFile(toAbsolutePath(path))
+  if (absPath === null) throw new Error("couldn't locate path: " + path)
+  const entry = getFile(absPath, options)
   await onReady(entry)
-  const bundleInstance = new Bundle(entry)
+  const bundleInstance = new Bundle(entry, options)
   await onChange(bundle(entry), bundleInstance)
   if (options.watch) {
     entry.onChange = () => {
-      onChange(bundle(entry), new Bundle(entry))
+      onChange(bundle(entry), new Bundle(entry, options as IOptions))
     }
     watchAllImports(entry, options)
   }
   return bundleInstance
+}
+function toAbsolutePath(path: string, dir = process.cwd()) {
+  switch (path[0]) {
+    case ".":
+    case "/":
+      return join(dir, path)
+    default:
+      return path
+  }
 }
 function watchAllImports(
   o: IFileNode,
@@ -373,13 +378,16 @@ function watchAllImports(
 ) {
   if (seenNodes.has(o)) return
   seenNodes.add(o)
+  if (options.onFileInvalidated !== undefined)
+    o.onChangeListeners.add(options.onFileInvalidated)
   watchNode(o, options)
   o.imports.forEach(imo => watchAllImports(imo, options, seenNodes))
 }
-function updateOwners(im: IFileNode) {
-  im.usedBy.forEach(p => {
+function updateOwners(node: IFileNode, options: IOptions) {
+  node.usedBy.forEach(p => {
+    p.onChangeListeners.forEach(f => f(p.path, p.content))
     p.onChange?.()
-    updateOwners(p)
+    updateOwners(p, options)
   })
 }
 function handleFileStatsError(e: any, node: IFileNode) {
@@ -405,7 +413,8 @@ const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
       node.onChange()
     })
   }
-  updateOwners(node)
+  node.onChangeListeners.forEach(f => f(node.path, node.content))
+  updateOwners(node, options)
 }, 100)
 
 function watchNode(node: IFileNode, options: IOptions) {
@@ -413,10 +422,7 @@ function watchNode(node: IFileNode, options: IOptions) {
 }
 
 class Bundle {
-  node: IFileNode
-  constructor(b: IFileNode) {
-    this.node = b
-  }
+  constructor(public node: IFileNode, public options: IOptions) {}
   closeWatcher() {
     closeWatcher(this.node)
   }
@@ -434,8 +440,8 @@ function closeWatcher(o: IFileNode) {
 function deleteNode(node: IFileNode) {
   node.imports.forEach(imNode => {
     imNode.usedBy.delete(node)
-    if (imNode.usedBy.size === 0 && imNode.onChange === undefined) {
-    }
+    if (imNode.usedBy.size === 0 && imNode.onChange === undefined)
+      deleteNode(imNode)
   })
   node.usedBy.forEach(u =>
     u.imports.splice(u.imports.findIndex(v => v === node))
