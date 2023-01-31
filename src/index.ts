@@ -253,7 +253,7 @@ async function getFileContent(
   const ext = extname(filePath)
   const pluginHandler = plugins?.[ext]
   if (pluginHandler) {
-    return pluginHandler(content, basename(filePath))
+    return pluginHandler(content, filePath)
   }
   switch (ext) {
     case ".js":
