@@ -21,7 +21,7 @@ const genId = (function () {
   let i = 0
   return () => "id" + i++
 })()
-const ids = factory(() => genId())
+const ids = factory(genId)
 async function findNodeModules(dir: string): Promise<string> {
   try {
     const path = join(dir, "node_modules")
@@ -150,10 +150,10 @@ async function getFileStats(path: string, options: IOptions) {
         let ret = ""
         const handlers = [
           (m: string, name: string) =>
-            (ret += `const ${name} = ${ids[imPath]}()\n`),
+            (ret += `const ${name} = ${ids(imPath)}()\n`),
           (m: string) =>
-            (ret += `const ${m.replace("as", ":")} = ${ids[imPath]}()\n`),
-          (m: string) => (ret += `const ${m} = ${ids[imPath]}().default\n`),
+            (ret += `const ${m.replace("as", ":")} = ${ids(imPath)}()\n`),
+          (m: string) => (ret += `const ${m} = ${ids(imPath)}().default\n`),
         ]
         while (strIndex < ims.length) {
           impRgx.some((r, i) => {
@@ -179,7 +179,7 @@ async function getFileStats(path: string, options: IOptions) {
         const imPath = await figurePath(dirname(path), p, options)
         if (imPath === null) return m
         importsString.add(imPath)
-        return `${ids[imPath]}()\n`
+        return `${ids(imPath)}()\n`
       },
     },
     {
@@ -190,7 +190,7 @@ async function getFileStats(path: string, options: IOptions) {
         importsString.add(imPath)
         const name = basename(p, ".js")
         exports += `Object.assign(exports,${name});`
-        return `const ${name} = ${ids[imPath]}()\n`
+        return `const ${name} = ${ids(imPath)}()\n`
       },
     },
     {
@@ -234,7 +234,7 @@ async function getFileStats(path: string, options: IOptions) {
   ])
   imports = [...importsString].map(imPath => getFile(imPath, options))
   return {
-    content: `//${path}\n` + wrapFile(file, exports, ids[path]),
+    content: `//${path}\n` + wrapFile(file, exports, ids(path)),
     imports,
   }
 }
@@ -272,7 +272,7 @@ async function getFileContent(
 }
 function transformFile(path: string, options: IOptions): IFileNode {
   const obj: IFileNode = {
-    id: ids[path],
+    id: ids(path),
     path,
     imports: [],
     content: "",
@@ -290,10 +290,8 @@ function transformFile(path: string, options: IOptions): IFileNode {
     })
   return obj
 }
-const files: Record<string, IFileNode> = {}
-function getFile(path: string, options: IOptions) {
-  return files[path] || (files[path] = transformFile(path, options))
-}
+const getFile = factory(transformFile)
+
 async function onReady(
   node: IFileNode,
   ancestorsPaths: Set<IFileNode> = new Set()
@@ -430,7 +428,7 @@ class Bundle {
   }
 }
 export function closeAllBundles() {
-  Object.values(files).forEach(n => n.watcher?.close())
+  Object.values(getFile.__store).forEach(n => n.watcher?.close())
 }
 function closeWatcher(o: IFileNode) {
   o.watcher?.close()
@@ -446,5 +444,5 @@ function deleteNode(node: IFileNode) {
     u.imports.splice(u.imports.findIndex(v => v === node))
   )
   node.watcher?.close()
-  delete files[node.path]
+  delete getFile.__store[node.path]
 }
