@@ -10,6 +10,7 @@ type IOptions = Partial<{
   bundleNodeModules: boolean
   watch: boolean
   onFileInvalidated: (filename: string, content: string) => void
+  onFileDelete: (filename: string) => void
   minify: boolean
   plugins: Record<any, (code: string, filename: string) => string>
 }>
@@ -286,7 +287,7 @@ function transformFile(path: string, options: IOptions): IFileNode {
       stats.imports.forEach(o => o.usedBy.add(obj))
     })
     .catch(e => {
-      handleFileStatsError(e, obj)
+      handleFileStatsError(e, obj, options)
     })
   return obj
 }
@@ -387,21 +388,18 @@ function updateOwners(node: IFileNode, options: IOptions) {
     updateOwners(p, options)
   })
 }
-function handleFileStatsError(e: any, node: IFileNode) {
-  console.warn("failed to evaluate file at: " + node.path)
-  if (e.code === "ENOENT") {
-    deleteNode(node)
-  } else {
-    console.clear()
-    return console.log(e)
-  }
+function handleFileStatsError(e: any, node: IFileNode, options: IOptions) {
+  console.warn("failed to watch file at: " + node.path)
+  deleteNode(node, options)
+  console.clear()
+  return console.log(e)
 }
 const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
   node.imports.forEach(o => o.usedBy.delete(node))
   try {
     Object.assign(node, await getFileStats(node.path, options))
   } catch (e) {
-    return handleFileStatsError(e, node)
+    return handleFileStatsError(e, node, options)
   }
   node.imports.forEach(o => o.usedBy.add(node))
   watchAllImports(node, options)
@@ -415,7 +413,16 @@ const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
 }, 100)
 
 function watchNode(node: IFileNode, options: IOptions) {
-  node.watcher ??= watch(node.path, () => handleChange(node, options))
+  node.watcher ??= watch(node.path, eventType => {
+    switch (eventType) {
+      case "change":
+        return handleChange(node, options)
+      case "rename":
+        access(node.path).catch(e => {
+          deleteNode(node, options)
+        })
+    }
+  })
 }
 
 class Bundle {
@@ -434,11 +441,12 @@ function closeWatcher(o: IFileNode) {
   o.watcher?.close()
   o.imports.forEach(closeWatcher)
 }
-function deleteNode(node: IFileNode) {
+function deleteNode(node: IFileNode, options: IOptions) {
+  options.onFileDelete?.(node.path)
   node.imports.forEach(imNode => {
     imNode.usedBy.delete(node)
     if (imNode.usedBy.size === 0 && imNode.onChange === undefined)
-      deleteNode(imNode)
+      deleteNode(imNode, options)
   })
   node.usedBy.forEach(u =>
     u.imports.splice(u.imports.findIndex(v => v === node))
