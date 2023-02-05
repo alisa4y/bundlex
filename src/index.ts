@@ -394,7 +394,14 @@ function handleFileStatsError(e: any, node: IFileNode, options: IOptions) {
   console.clear()
   return console.log(e)
 }
-const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
+type WatchHandler = (node: IFileNode, options: IOptions) => void
+function watchNode(node: IFileNode, options: IOptions) {
+  const handler = debounce((fn: WatchHandler) => fn(node, options), 100)
+  node.watcher ??= watch(node.path, eventType =>
+    handler(eventType === "change" ? handleChange : deleteNode)
+  )
+}
+async function handleChange(node: IFileNode, options: IOptions) {
   node.imports.forEach(o => o.usedBy.delete(node))
   try {
     Object.assign(node, await getFileStats(node.path, options))
@@ -410,19 +417,6 @@ const handleChange = debounce(async (node: IFileNode, options: IOptions) => {
   }
   node.onChangeListeners.forEach(f => f(node.path, node.content))
   updateOwners(node, options)
-}, 100)
-
-function watchNode(node: IFileNode, options: IOptions) {
-  node.watcher ??= watch(node.path, eventType => {
-    switch (eventType) {
-      case "change":
-        return handleChange(node, options)
-      case "rename":
-        access(node.path).catch(e => {
-          deleteNode(node, options)
-        })
-    }
-  })
 }
 
 class Bundle {
