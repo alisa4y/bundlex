@@ -149,6 +149,11 @@ describe("impundler", () => {
       done()
     })
   })
+  it("will throw error on empty files and can be handled", done => {
+    impundler("./test/emptyFile.js", code => {}).catch(e => {
+      done()
+    })
+  })
 })
 describe("passing plugins", () => {
   it("giving jsx plugin", done => {
@@ -171,7 +176,7 @@ describe("passing plugins", () => {
     )
   })
 })
-describe("fixing some bugs on real life projectsu", () => {
+describe("fixing some bugs on real life projects", () => {
   it("bundle correctly", done => {
     impundler("./test/quote.js", code => {
       eval(code)

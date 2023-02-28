@@ -69,10 +69,9 @@ async function findFile(path: string) {
 
       const entry = main || browser || module || unpkg || jsdelivr
       if (entry === undefined) {
-        console.warn(
+        throw new Error(
           "no index or entry in package.json found for giving path: " + path
         )
-        return null
       }
       return join(possibleFile, entry)
     }
@@ -242,13 +241,14 @@ async function getFileStats(path: string, options: IOptions) {
 async function getFileContent(
   filePath: string,
   plugins?: IOptions["plugins"],
-  count = 10
+  count = 3
 ): Promise<string> {
   if (count === 0)
-    throw new Error("file is empty or can't read it:\n\t" + filePath)
+    throw new Error("file is empty or can't read it: " + filePath)
   const content = await readFile(filePath, "utf-8")
+  // sometimes for some reasons OS can't read file so after an amount of time it retry to read the file again
   if (content === "") {
-    await timeout(50)
+    await timeout(70)
     return getFileContent(filePath, plugins, count - 1)
   }
   const ext = extname(filePath)
@@ -389,10 +389,7 @@ function updateOwners(node: IFileNode, options: IOptions) {
   })
 }
 function handleFileStatsError(e: any, node: IFileNode, options: IOptions) {
-  console.warn("failed to watch file at: " + node.path)
   deleteNode(node, options)
-  console.clear()
-  return console.log(e)
 }
 type WatchHandler = (node: IFileNode, options: IOptions) => void
 function watchNode(node: IFileNode, options: IOptions) {
