@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 const { writeFile } = require("fs/promises")
 const { join } = require("path")
-// const { impundler } = require("../dist/index.js")
-function impundler(path, data) {
-  console.log(path)
-  console.log(data)
-}
+const { impundler } = require("../dist/index.js")
+
 const filename = process.argv[2]
 const args = process.argv.slice(3)
 const outputPath = "./bundle.js"
