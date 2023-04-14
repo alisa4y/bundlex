@@ -381,11 +381,17 @@ function watchAllImports(
   watchNode(o, options)
   o.imports.forEach(imo => watchAllImports(imo, options, seenNodes))
 }
-function updateOwners(node: IFileNode, options: IOptions) {
+function updateOwners(
+  node: IFileNode,
+  options: IOptions,
+  seenNodes: Set<IFileNode> = new Set()
+) {
   node.usedBy.forEach(p => {
+    if (seenNodes.has(p)) return
+    seenNodes.add(p)
     p.onChangeListeners.forEach(f => f(p.path, p.content))
     p.onChange?.()
-    updateOwners(p, options)
+    updateOwners(p, options, seenNodes)
   })
 }
 function handleFileStatsError(e: any, node: IFileNode, options: IOptions) {
