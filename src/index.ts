@@ -332,8 +332,8 @@ function bundle(node: IFileNode) {
   const { imports, content, id } = node
   return (
     getAllImports(imports, new Set([node]))
-      .map(v => `let ${v.id} = ${v.content}`)
-      .join("\n") + `\nlet ${id};(${content})()`
+      .map(v => `var ${v.id} = ${v.content}`)
+      .join("\n") + `\nvar ${id};(${content})()`
   )
 }
 type ImHandler = (result: string, bundle: Bundle) => void
