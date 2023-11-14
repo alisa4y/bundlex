@@ -126,8 +126,15 @@ describe("impundler", () => {
       done()
     })
   })
-  it("can import folder by importing its index file", done => {
+  it("can import folder by importing its index file without format", done => {
     impundler("./test/indexImport.ts", result => {
+      const { doingAdd } = eval(result)
+      expect(doingAdd).toEqual("2 + 4 = 6")
+      done()
+    })
+  })
+  it("can import folder by importing its folder path and nothing more", done => {
+    impundler("./test/folderImport.ts", result => {
       const { doingAdd } = eval(result)
       expect(doingAdd).toEqual("2 + 4 = 6")
       done()
