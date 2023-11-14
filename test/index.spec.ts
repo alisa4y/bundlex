@@ -114,7 +114,7 @@ describe("impundler", () => {
       done()
     })
   })
-  it("test multilen import to bundleu", done => {
+  it("test multiline import to bundle", done => {
     impundler("./test/multiLine.js", result => {
       eval(result)
       done()
@@ -126,7 +126,14 @@ describe("impundler", () => {
       done()
     })
   })
-  it("can import folder by importing its index file without format", done => {
+  it("can import file by importing its name without format", done => {
+    impundler("./test/nameImport.ts", result => {
+      const { doingAdd } = eval(result)
+      expect(doingAdd).toEqual("2 + 4 = 6")
+      done()
+    })
+  })
+  it("can import file by importing its name even if it is index file without format", done => {
     impundler("./test/indexImport.ts", result => {
       const { doingAdd } = eval(result)
       expect(doingAdd).toEqual("2 + 4 = 6")

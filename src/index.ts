@@ -1,6 +1,6 @@
 import { factory, timeout, debounce } from "vaco"
 import { asyncReplaceMultiPattern } from "arep"
-import { watch } from "fs"
+import { watch, existsSync } from "fs"
 import { readFile, access, readdir, stat } from "fs/promises"
 import { basename, dirname, extname, join, parse } from "path"
 import ts from "typescript"
@@ -37,16 +37,14 @@ async function findNodeModules(dir: string): Promise<string> {
     }
   }
 }
-async function findFile(path: string) {
+const jsMatch = /(?<!\.d)\.[tj]sx?$/
+async function findFile2(path: string) {
   try {
     const name = basename(path)
     const dir = dirname(path)
     const files = await readdir(dir)
     const found = files.find(
-      f =>
-        f.startsWith(name) &&
-        parse(f).name.length - name.length <= 0 &&
-        !f.endsWith(".d.ts")
+      f => f.startsWith(name) && parse(f).name.length - name.length <= 0
     )
     if (!found) return null
 
@@ -54,9 +52,13 @@ async function findFile(path: string) {
     if ((await stat(possibleFile)).isDirectory()) {
       if (name !== found) return null // means same start name but different folders
       const childFiles = await readdir(path)
-      const indexFile = childFiles.find(
-        f => parse(f).name === "index" && !f.endsWith(".d.ts")
+      const indexFiles = childFiles.filter(
+        f => parse(f).name === "index" && jsMatch.test(f)
       )
+      const indexFile =
+        indexFiles.length > 1
+          ? indexFiles.find(f => f.endsWith("js"))
+          : indexFiles[0]
 
       if (indexFile) return join(path, indexFile)
 
@@ -79,6 +81,49 @@ async function findFile(path: string) {
   } catch (e) {
     return null
   }
+}
+async function findFile(path: string): Promise<string | null> {
+  if (extname(path) !== "") return path // specific path returns as it is
+  try {
+    // if it is folder path try to get the package.json or a default index.js file in that folder
+    if ((await stat(path)).isDirectory()) {
+      const packageJsonPath = join(path, "package.json")
+      if (!existsSync(packageJsonPath)) {
+        const childFiles = await readdir(path)
+        const indexFiles = childFiles.filter(
+          f => parse(f).name === "index" && jsMatch.test(f)
+        )
+        const indexFile = getRightFile(indexFiles)
+
+        if (indexFile === null)
+          throw new Error(
+            "no package.json or index file found for giving path: " + path
+          )
+        return join(path, indexFile)
+      }
+
+      const { main, browser, module, unpkg, jsdelivr } = JSON.parse(
+        await readFile(packageJsonPath, "utf8")
+      )
+      const entry = main || browser || module || unpkg || jsdelivr
+      return join(path, entry)
+    }
+  } catch {
+    // assumes the path is a file with no extension
+    const dir = dirname(path)
+    if (basename(dir) === "node_modules" || !existsSync(dir)) return null // assumes it is native
+    const bn = basename(path)
+    const indexFile = getRightFile(
+      (await readdir(dir)).filter(f => parse(f).name === bn)
+    )
+    if (indexFile !== null) return join(dir, indexFile)
+  }
+  return null
+}
+function getRightFile(files: string[]): string | null {
+  if (files.length === 1) return files[0]
+  if (files.length > 1) return files.find(f => jsMatch.test(f))
+  return null
 }
 async function figurePath(dir: string, path: string, options: IOptions) {
   switch (path[0]) {
