@@ -1,4 +1,4 @@
-import { Greet } from "./components"
+import { Greet } from "./components.jsx"
 export function App(props) {
   return (
     <main>

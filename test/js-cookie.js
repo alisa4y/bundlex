@@ -1,2 +1,2 @@
-import Cookies from "js-cookie"
+import * as Cookies from "js-cookie"
 Cookies.set
