@@ -1,6 +1,6 @@
 import { createBundler, jsBundler, extractor, bundler } from "../src"
 import { writeFile, readFile } from "fs/promises"
-import { timeout } from "vaco"
+import { ox, timeout } from "vaco"
 import { transpileJSX } from "jsxpiler"
 import { join } from "path"
 import { writeFileSync } from "fs"
@@ -41,51 +41,6 @@ describe("jsBundler", () => {
   it("can bundle from node_modules", async () => {
     const result = await jsBundler("./test/modules/m3.js")
     eval(result)
-  })
-  it("updates itself for changes", async () => {
-    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hi ali")
-
-    await writeFile(
-      "./test/modules/m1.js",
-      `import { greet } from "./m2.js"
-      return greet("batman")`
-    )
-    await timeout(10)
-
-    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hi batman")
-
-    await writeFile(
-      "./test/modules/m2.js",
-      `export function greet(name) {
-        return "hello " + name
-      }`
-    )
-    await timeout(10)
-
-    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual(
-      "hello batman"
-    )
-    await writeFile(
-      "./test/modules/m1.js",
-      `import { greet } from "./m2.js"
-      return greet("world")`
-    )
-    await timeout(10)
-
-    // the watcher has throttle time
-    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual(
-      "hello batman"
-    )
-
-    await timeout(600)
-    await writeFile(
-      "./test/modules/m1.js",
-      `import { greet } from "./m2.js"
-      return greet("world")`
-    )
-    await timeout(10)
-
-    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hello world")
   })
   it("can ignore comments", async () => {
     const result = await jsBundler("./test/comment.js")
@@ -137,6 +92,53 @@ describe("jsBundler", () => {
   })
 })
 describe("jsBundler adding listener", () => {
+  it("can set change listenr to update itself for changes", async () => {
+    jsBundler.on("change", ox)
+
+    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hi ali")
+
+    await writeFile(
+      "./test/modules/m1.js",
+      `import { greet } from "./m2.js"
+      return greet("batman")`
+    )
+    await timeout(10)
+
+    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hi batman")
+
+    await writeFile(
+      "./test/modules/m2.js",
+      `export function greet(name) {
+        return "hello " + name
+      }`
+    )
+    await timeout(10)
+
+    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual(
+      "hello batman"
+    )
+    await writeFile(
+      "./test/modules/m1.js",
+      `import { greet } from "./m2.js"
+      return greet("world")`
+    )
+    await timeout(10)
+
+    // the watcher has throttle time
+    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual(
+      "hello batman"
+    )
+
+    await timeout(600)
+    await writeFile(
+      "./test/modules/m1.js",
+      `import { greet } from "./m2.js"
+      return greet("world")`
+    )
+    await timeout(10)
+
+    expect(eval(await jsBundler("./test/modules/m1.js"))).toEqual("hello world")
+  })
   it("can add listener to listen when a file changes and give its path", done => {
     writeFileSync("./test/change_test/f1.js", `export const msg = "hello"`)
     jsBundler("./test/change_test/f1.js").then(result => {

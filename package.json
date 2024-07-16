@@ -1,6 +1,6 @@
 {
   "name": "bundlex",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "very fast in memory javascript bundler",
   "main": "build/index.js",
   "types": "build/index.d.ts",

@@ -20,6 +20,7 @@ export function createBundler(
   extractor: InfoExtractor,
   _bundler: Bundler
 ): Bundle {
+  const flags: { [key in EventNames]: boolean } = { change: false }
   const onChangeListeners = [] as Listener[]
   const getBundleData = mapFactory(async (path: string) => {
     const info = await extractor(path)
@@ -28,56 +29,62 @@ export function createBundler(
       imports: new Set(info.imports.map(getBundleData)),
       usedBy: new Set(),
     } as BundleData
-    data.watcher = watch(
-      path,
-      throttle(async eventType => {
-        switch (eventType) {
-          case "change":
-            // import
-            const newInfo = await extractor(path)
-            const removedImports = info.imports.filter(
-              imp => !newInfo.imports.includes(imp)
-            )
-            const addedImports = newInfo.imports.filter(
-              imp => !info.imports.includes(imp)
-            )
-            data.info = newInfo
-            data.imports = new Set(newInfo.imports.map(getBundleData))
-            ;(await Promise.all(removedImports.map(getBundleData))).forEach(
-              b => {
-                b.usedBy.delete(data)
 
-                if (b.usedBy.size === 0) {
-                  b.watcher.close()
-                  getBundleData.collection.delete(b.info.path)
+    if (flags.change) {
+      data.watcher = watch(
+        path,
+        throttle(async eventType => {
+          switch (eventType) {
+            case "change":
+              // import
+              const newInfo = await extractor(path)
+              const removedImports = info.imports.filter(
+                imp => !newInfo.imports.includes(imp)
+              )
+              const addedImports = newInfo.imports.filter(
+                imp => !info.imports.includes(imp)
+              )
+              data.info = newInfo
+              data.imports = new Set(newInfo.imports.map(getBundleData))
+              ;(await Promise.all(removedImports.map(getBundleData))).forEach(
+                b => {
+                  b.usedBy.delete(data)
+
+                  if (b.usedBy.size === 0) {
+                    ;(b.watcher as FSWatcher).close()
+                    getBundleData.collection.delete(b.info.path)
+                  }
                 }
-              }
-            )
-            ;(await Promise.all(addedImports.map(getBundleData))).forEach(b => {
-              b.usedBy.add(data)
-            })
+              )
+              ;(await Promise.all(addedImports.map(getBundleData))).forEach(
+                b => {
+                  b.usedBy.add(data)
+                }
+              )
 
-            break
-          case "rename":
-            getBundleData.collection.delete(info.path)
-            break
-        }
+              break
+            case "rename":
+              getBundleData.collection.delete(info.path)
+              break
+          }
 
-        const changedBundles = findTopBundlesData(data, bundler.collection)
+          const changedBundles = findTopBundlesData(data, bundler.collection)
 
-        changedBundles.forEach(b => bundler.collection.delete(b.info.path))
-        changedBundles.forEach(b =>
-          onChangeListeners.forEach(f => f(b.info.path))
-        )
-      }, 500)
-    )
+          changedBundles.forEach(b => bundler.collection.delete(b.info.path))
+          changedBundles.forEach(b =>
+            onChangeListeners.forEach(f => f(b.info.path))
+          )
+        }, 500)
+      )
+
+      allWatchers.push(data.watcher)
+    }
 
     data.imports.forEach(i =>
       i.then(d => {
         d.usedBy.add(data)
       })
     )
-    allWatchers.push(data.watcher)
 
     return data
   })
@@ -97,7 +104,15 @@ export function createBundler(
   transpiler.on = (event: EventNames, listener: Listener) => {
     switch (event) {
       case "change":
+        if (flags.change === false) {
+          flags.change = true
+
+          getBundleData.collection.clear()
+          bundler.collection.clear()
+        }
+
         onChangeListeners.push(listener)
+
         break
       default:
     }
