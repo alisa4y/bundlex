@@ -16,7 +16,7 @@ export type BundleData = {
   info: Info
   imports: Set<Promise<BundleData>>
   usedBy: Set<BundleData>
-  watcher?: FSWatcher
+  watcher: FSWatcher
 }
 export type InfoExtractor = (path: string) => Promise<Info>
 export type Bundler = (contents: Info[]) => string
