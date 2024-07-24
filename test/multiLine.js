@@ -1,11 +1,8 @@
 import {
-  curry,
-  pipe,
-  aim,
-  exploit,
-  fork,
   compose,
-  guard,
-  beat,
-  queue,
-} from "bafu"
+  mapFactory,
+  removeDuplicates,
+  retry,
+  separateArray,
+  curry,
+} from "vaco"

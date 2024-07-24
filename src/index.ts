@@ -1,7 +1,8 @@
-import { createBundler } from "./core"
+import { createBundler, createWatcherBundler } from "./core"
 import { bundler, extractor } from "./jsBundler"
 
 // --------------------  main  --------------------
-export { createBundler }
+export { createWatcherBundler, createBundler }
 export * from "./jsBundler"
-export const jsBundler = createBundler(extractor, bundler)
+export const jsBundle = createBundler(extractor, bundler)
+export const jsWatchBundle = createWatcherBundler(extractor, bundler)

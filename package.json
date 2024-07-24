@@ -1,17 +1,17 @@
 {
   "name": "bundlex",
-  "version": "2.2.0",
+  "version": "2.2.2",
   "description": "very fast in memory javascript bundler",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
-    "prepack": "tsc",
     "build": "tsc",
     "build:watch": "tsc --watch",
+    "prepack": "npm run build",
     "test": "jest --detectOpenHandles"
   },
   "bin": {
-    "bundlex": "./bin/index.js"
+    "bundlex": "bin/index.js"
   },
   "keywords": [
     "bundler",
@@ -27,13 +27,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alisa4y/js-bundler.git"
+    "url": "git+https://github.com/alisa4y/js-bundler.git"
   },
   "dependencies": {
-    "bafu": "^2.0.0",
     "ontermination": "^1.0.1",
     "typescript": "^5.5.3",
-    "vaco": "^2.4.2"
+    "vaco": "^3.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.2.2",

@@ -1,30 +1,61 @@
 import { mapFactory, throttle } from "vaco"
 import {
-  Bundle,
-  BundleData,
+  WatcherBundle,
+  WatcherBundleData,
   InfoExtractor,
   Bundler,
   Listener,
   EventNames,
+  Bundle,
+  Info,
 } from "./data"
 import { watch, FSWatcher } from "fs"
 import { join } from "path"
 import { onProcessTermination } from "ontermination"
+import { isAbsolute } from "path"
 
-// --------------------  constants  --------------------
-const allWatchers: FSWatcher[] = []
-
-// --------------------  main  --------------------
+// --------------------  bundlers  --------------------
 export function createBundler(
   extractor: InfoExtractor,
   bundler: Bundler
 ): Bundle {
+  return async (path: string) =>
+    bundler(await getAllInfos(getAbsPath(path), extractor))
+}
+async function getAllInfos(
+  path: string,
+  extractor: (p: string) => Promise<Info>,
+  seenPath = new Set<string>()
+): Promise<Info[]> {
+  if (seenPath.has(path)) return []
+
+  seenPath.add(path)
+
+  const info = await extractor(path)
+
+  return [
+    info,
+    ...(
+      await Promise.all(
+        info.imports.map(p => getAllInfos(p, extractor, seenPath))
+      )
+    ).flat(),
+  ]
+}
+
+// --------------------  watch bundler  --------------------
+export function createWatcherBundler(
+  extractor: InfoExtractor,
+  bundler: Bundler
+): WatcherBundle {
   const onChangeListeners = [] as Listener[]
+  const allWatchers: FSWatcher[] = []
+  const closeAllWatchers = () => allWatchers.forEach(w => w.close())
   const getBundleData = mapFactory(async (path: string) => {
     const info = await extractor(path)
-    const data: BundleData = {
+    const data: WatcherBundleData = {
       info,
-      imports: new Set(info.imports.map(getBundleData)),
+      imports: info.imports.map(getBundleData),
       usedBy: new Set(),
       watcher: watch(
         path,
@@ -40,13 +71,13 @@ export function createBundler(
                 imp => !info.imports.includes(imp)
               )
               data.info = newInfo
-              data.imports = new Set(newInfo.imports.map(getBundleData))
+              data.imports = newInfo.imports.map(getBundleData)
               ;(await Promise.all(removedImports.map(getBundleData))).forEach(
                 b => {
                   b.usedBy.delete(data)
 
                   if (b.usedBy.size === 0) {
-                    ;(b.watcher as FSWatcher).close()
+                    b.watcher.close()
                     getBundleData.collection.delete(b.info.path)
                   }
                 }
@@ -81,8 +112,7 @@ export function createBundler(
     return data
   })
   const transpiler = async (path: string) => {
-    if (path[0] === ".") path = join(process.cwd(), path)
-
+    path = getAbsPath(path)
     const data = await getBundleData(path)
 
     return bundler((await getAllImports(data)).map(v => v.info))
@@ -96,13 +126,16 @@ export function createBundler(
       default:
     }
   }
+  transpiler.close = closeAllWatchers
+
+  onProcessTermination(closeAllWatchers)
 
   return transpiler
 }
 async function getAllImports(
-  bData: BundleData,
-  seenBundles = new Set<BundleData>()
-): Promise<BundleData[]> {
+  bData: WatcherBundleData,
+  seenBundles = new Set<WatcherBundleData>()
+): Promise<WatcherBundleData[]> {
   if (seenBundles.has(bData)) return []
 
   seenBundles.add(bData)
@@ -119,9 +152,9 @@ async function getAllImports(
   ]
 }
 function findTopBundlesData(
-  bData: BundleData,
-  seenBundles = new Set<BundleData>()
-): BundleData[] {
+  bData: WatcherBundleData,
+  seenBundles = new Set<WatcherBundleData>()
+): WatcherBundleData[] {
   if (seenBundles.has(bData)) return []
 
   seenBundles.add(bData)
@@ -135,8 +168,8 @@ function findTopBundlesData(
   return results
 }
 
-// --------------------  cleaning  --------------------
-onProcessTermination(() => {
-  console.log("closing all watchers in bundler")
-  allWatchers.forEach(w => w.close())
-})
+// --------------------  tools  --------------------
+
+function getAbsPath(path: string): string {
+  return isAbsolute(path) ? path : join(process.cwd(), path)
+}

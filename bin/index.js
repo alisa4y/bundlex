@@ -2,7 +2,8 @@
 
 const { writeFile } = require("fs/promises")
 const { join } = require("path")
-const { jsBundler } = require("../build/index.js")
+const { jsBundle, jsWatchBundle } = require("../build/index.js")
+const { onProcessTermination } = require("ontermination")
 
 // --------------------  constants  --------------------
 const filename = process.argv[2]
@@ -12,14 +13,19 @@ const data = {
   watch: false,
   output: join(process.cwd(), outputPath),
 }
+let bundle = jsBundle
 
 // --------------------  main  --------------------
 async function main() {
   parseArgs(data, ...args)
-  await bundle(filename)
+
+  if (data.watch) bundle = jsWatchBundle
+
+  await doBundle(filename)
 
   if (data.watch) {
-    jsBundler.on("change", bundle)
+    jsWatchBundle.on("change", doBundle)
+    onProcessTermination(() => jsWatchBundle.close())
   } else process.exit()
 }
 function parseArgs(data, arg, ...args) {
@@ -48,9 +54,9 @@ args are :
 
   return data
 }
-async function bundle(path) {
+async function doBundle(path) {
   console.log("bundling...")
-  await writeFile(data.output, await jsBundler(path), "utf8")
+  await writeFile(data.output, await bundle(path), "utf8")
   console.log("bundled into: " + data.output)
 }
 

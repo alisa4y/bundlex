@@ -21,7 +21,7 @@ describe("CLI command tests", () => {
         return
       }
 
-      await timeout(100)
+      await timeout(200)
 
       const { msg } = eval(readFileSync("./bundle.js").toString())
 
@@ -35,10 +35,11 @@ describe("CLI command tests", () => {
       `npx bundlex ${filePath} --output ${customPath}`,
       async (error, stdout, stderr) => {
         if (error) {
-          throw error
+          done(error)
+          return
         }
 
-        await timeout(100)
+        await timeout(200)
 
         const { msg } = eval(readFileSync(customPath).toString())
 

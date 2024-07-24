@@ -1,5 +1,5 @@
 node_modules
 src
-test
+test*
 tsconfig.json
 jest.config.js

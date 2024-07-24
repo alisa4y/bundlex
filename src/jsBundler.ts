@@ -1,9 +1,14 @@
 import { Info } from "./data"
 import { existsSync } from "fs"
 import { readFile, stat } from "fs/promises"
-import { attempt, mapFactory, separateArray } from "vaco"
-import { aim, compose } from "bafu"
-import { removeDuplicate } from "./tools"
+import {
+  compose,
+  mapFactory,
+  removeDuplicates,
+  retry,
+  separateArray,
+  curry,
+} from "vaco"
 import { extname, dirname, join } from "path"
 import ts from "typescript"
 
@@ -37,15 +42,15 @@ const reExportHandlers: ((
   (m: string, nick: string) => ({ name: "", nick: "." + nick }),
   (m: string) => getExportsName(m.trim().slice(1, -1)),
 ]
-const commentParser = aim(parse, {
+const commentParser = curry(parse, {
   regex: commentRgxs,
   converter: ignoreConverter,
 })
-const stringParser = aim(parse, {
+const stringParser = curry(parse, {
   regex: stringRgxs,
   converter: ignoreConverter,
 })
-const linkParser = aim(parse, {
+const linkParser = curry(parse, {
   regex: linkRgx,
   converter: (m, g1, g2) => ({
     type: "link",
@@ -102,9 +107,9 @@ const converters: Converter[] = [
     ],
   },
 ]
-const parsers = converters.reverse().map(converter => aim(parse, converter))
+const parsers = converters.reverse().map(converter => curry(parse, converter))
 const mainParse = compose(...parsers, stringParser, linkParser, commentParser)
-const read = attempt(readFile, 4, 250)
+const read = retry(readFile, 250, 2000)
 
 // --------------------  extractor  --------------------
 export async function extractor(path: string): Promise<Info> {
@@ -126,7 +131,7 @@ export async function extractor(path: string): Promise<Info> {
   return {
     path,
     content: compile(ps),
-    imports: removeDuplicate(
+    imports: removeDuplicates(
       ps.filter(p => p.type === "link").map(p => p.content)
     ),
   }
@@ -240,7 +245,7 @@ function getNextLink(ps: Parser[], index: number): Parser.link {
   return link
 }
 // --------------------  parser  --------------------
-function parse(ps: Parser[], handler: Converter): Parser[] {
+function parse(handler: Converter, ps: Parser[]): Parser[] {
   return ps.flatMap(p =>
     p.type === "text" ? splitByRegex(p.content, handler) : p
   )
