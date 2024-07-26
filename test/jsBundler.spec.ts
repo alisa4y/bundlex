@@ -6,7 +6,7 @@ import {
   bundler,
 } from "../src"
 import { writeFile, readFile } from "fs/promises"
-import { ox, timeout } from "vaco"
+import { timeout } from "vaco"
 import { transpileJSX } from "jsxpiler"
 import { join } from "path"
 import { writeFileSync } from "fs"

@@ -279,7 +279,13 @@ async function fixPath(path: string, refPath: string): Promise<string> {
   const dir = dirname(refPath)
 
   if (path[0] === ".") p = join(dir, path)
-  else p = await findModuleEntryPath(join(findNodeModules(dir), path))
+  else {
+    const modulePath = join(findNodeModules(dir), path)
+
+    if (existsSync(modulePath) && (await stat(modulePath)).isFile())
+      p = modulePath
+    else p = await findModuleEntryPath(modulePath)
+  }
 
   if (existsSync(p)) {
     if ((await stat(p)).isDirectory()) {
@@ -302,6 +308,7 @@ async function fixPath(path: string, refPath: string): Promise<string> {
       return p + ".js"
     }
   }
+
   return p
 }
 
