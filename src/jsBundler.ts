@@ -23,7 +23,7 @@ const ignoreConverter: Converter["converter"] = m => ({
 })
 const linkRgx: RegExp = joinRgxs([
   /(?<=(?<!\w|\$)from)\s*(?:"|')(.*?)(?:"|')/,
-  /(?<!\w|\$)require\((?:"|'|`)(.*)(?:"|'|`)\)/,
+  /(?<!\w|\$)require\((?:"|'|`)(.*?)(?:"|'|`)\)/,
 ])
 const impRgx = [
   /\s+\*\s+as\s+(\w+)/y, // import * as name from "path"

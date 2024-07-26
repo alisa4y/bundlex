@@ -11,6 +11,16 @@ import { transpileJSX } from "jsxpiler"
 import { join } from "path"
 import { writeFileSync } from "fs"
 // --------------------  tests  --------------------
+describe("extractor", () => {
+  it("detects require paths", async () => {
+    const info = await extractor("./test/common/multiReq.js")
+    const links = ["core", "enc-base64", "md5", "evpkdf", "cipher-core"].map(
+      p => p + ".js"
+    )
+
+    expect(info.imports.every((imp, i) => imp.endsWith(links[i]))).toBe(true)
+  })
+})
 describe("jsBundler", () => {
   beforeAll(done => {
     Promise.all([
