@@ -13,17 +13,22 @@ import { extname, dirname, join } from "path"
 import ts from "typescript"
 
 // --------------------  constants  --------------------
+// TODO: check string pattern faster, change link rgx to be right side only
 let id = 0
 const idGen = mapFactory((path: string) => "id" + id++)
-const stringRgxs: RegExp = joinRgxs([/'[^\\]*'/, /"[^\\]*"/, /`[^\\]*`/])
+const stringRgxs: RegExp = joinRgxs([
+  /`(?:\\.|[^\\`])*`/,
+  /"(?:\\.|[^\\"])*"/,
+  /'(?:\\.|[^\\'])*'/,
+])
 const commentRgxs: RegExp = joinRgxs([/\/\/.*/, /\/\*[\s\S]*?\*\//])
 const ignoreConverter: Converter["converter"] = m => ({
   type: "ignore",
   content: m,
 })
 const linkRgx: RegExp = joinRgxs([
-  /(?<=(?<!\w|\$)from)\s*(?:"|')(.*?)(?:"|')/,
-  /(?<!\w|\$)require\((?:"|'|`)(.*?)(?:"|'|`)\)/,
+  /(?<=(?<!\w|\$)from)\s+/,
+  /(?<!\w|\$)require\(/,
 ])
 const impRgx = [
   /\s+\*\s+as\s+(\w+)/y, // import * as name from "path"
@@ -48,13 +53,16 @@ const commentParser = curry(parse, {
 })
 const stringParser = curry(parse, {
   regex: stringRgxs,
-  converter: ignoreConverter,
+  converter: (m => ({
+    type: "string",
+    content: m,
+  })) as Converter["converter"],
 })
 const linkParser = curry(parse, {
   regex: linkRgx,
-  converter: (m, g1, g2) => ({
+  converter: () => ({
     type: "link",
-    content: g1 || g2,
+    content: "",
   }),
 } as Converter)
 const converters: Converter[] = [
@@ -108,7 +116,7 @@ const converters: Converter[] = [
   },
 ]
 const parsers = converters.reverse().map(converter => curry(parse, converter))
-const mainParse = compose(...parsers, stringParser, linkParser, commentParser)
+const mainParse = compose(...parsers, linkParser, stringParser, commentParser)
 const read = retry(readFile, 250, 2000)
 
 // --------------------  extractor  --------------------
@@ -123,8 +131,24 @@ export async function extractor(path: string): Promise<Info> {
   ])
 
   await Promise.all(
-    ps.map(async p => {
-      if (p.type === "link") p.content = await fixPath(p.content, path)
+    ps.map(async (p, i) => {
+      if (p.type === "link") {
+        const linkStr = ps[i + 1]
+
+        if (linkStr.type !== "string") return
+
+        p.content = await fixPath(linkStr.content.slice(1, -1), path)
+        linkStr.content = ""
+
+        const afterLink = ps[i + 2] as any
+
+        if (
+          typeof afterLink?.content === "string" &&
+          afterLink.content.startsWith(")")
+        ) {
+          afterLink.content = afterLink.content.slice(1)
+        }
+      }
     })
   )
 
@@ -155,7 +179,7 @@ export function bundler(infos: Info[]): string {
   )
 }
 function wrapFile(file: string, id: string) {
-  return `function ${id}(module={exports:{}}) {\nconst exports = module.exports;\n${id}=()=> module.exports;\n\n${file}\n\treturn module.exports}`
+  return `function ${id}(module={exports:{}}) {\nlet exports = module.exports;\n${id}=()=> module.exports;\n\n${file}\n\treturn module.exports}`
 }
 
 // --------------------  compiler  --------------------
@@ -399,6 +423,10 @@ type Converter = {
   converter: (...args: string[]) => Parser | Parser[]
 }
 namespace Parser {
+  export type String = {
+    type: "string"
+    content: string
+  }
   export type Igonre = {
     type: "ignore"
     content: string
@@ -436,6 +464,7 @@ type ExportName = {
   nick: string
 }
 type Parser =
+  | Parser.String
   | Parser.Igonre
   | Parser.Text
   | Parser.link
@@ -445,6 +474,7 @@ type Parser =
   | Parser.ReExportAll
 
 type CmopilerNodes =
+  | Parser.String
   | Parser.Igonre
   | Parser.Text
   | Parser.link

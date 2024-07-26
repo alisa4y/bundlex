@@ -20,6 +20,11 @@ describe("extractor", () => {
 
     expect(info.imports.every((imp, i) => imp.endsWith(links[i]))).toBe(true)
   })
+  it("ignores strings in backticks", async () => {
+    const info = await extractor("./test/common/backTickReq.js")
+
+    expect(info.imports.length).toBe(0)
+  })
 })
 describe("jsBundler", () => {
   beforeAll(done => {
@@ -66,6 +71,7 @@ describe("jsBundler", () => {
     const result = await jsBundle("./test/js-cookie.js")
     expect(() => eval(result)).not.toThrow()
   })
+
   it("test multiline import to bundle", async () => {
     const result = await jsBundle("./test/multiLine.js")
     expect(() => eval(result)).not.toThrow()
