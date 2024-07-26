@@ -279,6 +279,7 @@ async function fixPath(path: string, refPath: string): Promise<string> {
   const dir = dirname(refPath)
 
   if (path[0] === ".") p = join(dir, path)
+  else if (existsSync(path) && (await stat(path)).isFile()) p = path
   else {
     const modulePath = join(findNodeModules(dir), path)
 
