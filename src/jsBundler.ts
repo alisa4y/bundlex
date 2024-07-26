@@ -285,7 +285,13 @@ async function fixPath(path: string, refPath: string): Promise<string> {
 
     if (existsSync(modulePath) && (await stat(modulePath)).isFile())
       p = modulePath
-    else p = await findModuleEntryPath(modulePath)
+    else
+      try {
+        p = await findModuleEntryPath(modulePath)
+      } catch (e) {
+        console.error("Got error in finding path required by file: " + refPath)
+        throw e
+      }
   }
 
   if (existsSync(p)) {
