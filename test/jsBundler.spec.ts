@@ -194,7 +194,7 @@ describe("testing modifying bundler", () => {
           imports: [],
           path,
           content:
-            "// converting json to default export\nexports.default = " +
+            "exports.__esModule=true\nexports.default = " +
             (await readFile(path)),
         }
       }
@@ -228,6 +228,11 @@ describe("testing modifying bundler", () => {
 describe("fixing some bugs on real life projects", () => {
   it("bundle correctly", async () => {
     const code = await jsBundle("./test/quote.js")
+    expect(() => eval(code)).not.toThrow
+  })
+  it("can bundle grafy class", async () => {
+    const code = await jsBundle("./test/classTest.js")
+
     expect(() => eval(code)).not.toThrow
   })
 })
