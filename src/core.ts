@@ -1,11 +1,10 @@
 import { mapFactory, throttle } from "vaco"
 import {
-  WatcherBundle,
+  WatchBundle,
   WatcherBundleData,
   InfoExtractor,
   Bundler,
   Listener,
-  EventNames,
   Bundle,
   Info,
 } from "./data"
@@ -47,8 +46,8 @@ async function getAllInfos(
 export function createWatcherBundler(
   extractor: InfoExtractor,
   bundler: Bundler
-): WatcherBundle {
-  const onChangeListeners = [] as Listener[]
+): WatchBundle {
+  const onChangeListeners = mapFactory(path => [] as Listener[])
   const allWatchers: FSWatcher[] = []
   const closeAllWatchers = () => allWatchers.forEach(w => w.close())
   const getBundleData = mapFactory(async (path: string) => {
@@ -73,31 +72,36 @@ export function createWatcherBundler(
               data.info = newInfo
               data.imports = newInfo.imports.map(getBundleData)
               ;(await Promise.all(removedImports.map(getBundleData))).forEach(
-                b => {
-                  b.usedBy.delete(data)
+                removedImportedData => {
+                  removedImportedData.usedBy.delete(data)
 
-                  if (b.usedBy.size === 0) {
-                    b.watcher.close()
-                    getBundleData.collection.delete(b.info.path)
+                  if (removedImportedData.usedBy.size === 0) {
+                    removedImportedData.watcher.close()
+                    getBundleData.collection.delete(
+                      removedImportedData.info.path
+                    )
                   }
                 }
               )
               ;(await Promise.all(addedImports.map(getBundleData))).forEach(
-                b => {
-                  b.usedBy.add(data)
+                addedImprotedData => {
+                  addedImprotedData.usedBy.add(data)
                 }
               )
 
               break
             case "rename":
-              getBundleData.collection.delete(info.path)
+              getBundleData.collection.delete(path)
+              data.watcher.close()
               break
           }
 
-          if (onChangeListeners.length > 0)
-            findTopBundlesData(data).forEach(b => {
-              onChangeListeners.forEach(f => {
-                f(b.info.path)
+          findTopBundlesData(data)
+            .map(b => b.info.path)
+            .filter(bPath => onChangeListeners.collection.has(bPath))
+            .forEach(bPath => {
+              onChangeListeners(bPath).forEach(f => {
+                f("change", bPath)
               })
             })
         }, 500)
@@ -111,22 +115,29 @@ export function createWatcherBundler(
 
     return data
   })
-  const transpiler = async (path: string) => {
-    path = getAbsPath(path)
-    const data = await getBundleData(path)
+  const transpiler: WatchBundle = {
+    watch: async (path, listener) => {
+      path = getAbsPath(path)
+      const data = await getBundleData(path)
 
-    return bundler((await getAllImports(data)).map(v => v.info))
-  }
-  transpiler.on = (event: EventNames, listener: Listener) => {
-    switch (event) {
-      case "change":
-        onChangeListeners.push(listener)
+      onChangeListeners(path).push(listener)
+      await getAllImports(data)
+      return {
+        close: () => {
+          const listeners = onChangeListeners(path)
 
-        break
-      default:
-    }
+          listeners.splice(listeners.indexOf(listener), 1)
+        },
+      }
+    },
+    bundle: async path => {
+      path = getAbsPath(path)
+      const data = await getBundleData(path)
+
+      return bundler((await getAllImports(data)).map(v => v.info))
+    },
+    close: () => closeAllWatchers(),
   }
-  transpiler.close = closeAllWatchers
 
   onProcessTermination(closeAllWatchers)
 
@@ -169,7 +180,6 @@ function findTopBundlesData(
 }
 
 // --------------------  tools  --------------------
-
 function getAbsPath(path: string): string {
   return isAbsolute(path) ? path : join(process.cwd(), path)
 }

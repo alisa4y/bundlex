@@ -118,7 +118,9 @@ describe("watch jsBundle", () => {
     jsWatchBundle.close()
   })
   it("can set change listenr to update itself for changes", async () => {
-    expect(eval(await jsWatchBundle("./test/modules/m1.js"))).toEqual("hi ali")
+    expect(eval(await jsWatchBundle.bundle("./test/modules/m1.js"))).toEqual(
+      "hi ali"
+    )
 
     await writeFile(
       "./test/modules/m1.js",
@@ -127,7 +129,7 @@ describe("watch jsBundle", () => {
     )
     await timeout(10)
 
-    expect(eval(await jsWatchBundle("./test/modules/m1.js"))).toEqual(
+    expect(eval(await jsWatchBundle.bundle("./test/modules/m1.js"))).toEqual(
       "hi batman"
     )
 
@@ -139,7 +141,7 @@ describe("watch jsBundle", () => {
     )
     await timeout(10)
 
-    expect(eval(await jsWatchBundle("./test/modules/m1.js"))).toEqual(
+    expect(eval(await jsWatchBundle.bundle("./test/modules/m1.js"))).toEqual(
       "hello batman"
     )
     await writeFile(
@@ -150,7 +152,7 @@ describe("watch jsBundle", () => {
     await timeout(10)
 
     // the watcher has throttle time
-    expect(eval(await jsWatchBundle("./test/modules/m1.js"))).toEqual(
+    expect(eval(await jsWatchBundle.bundle("./test/modules/m1.js"))).toEqual(
       "hello batman"
     )
 
@@ -162,26 +164,28 @@ describe("watch jsBundle", () => {
     )
     await timeout(10)
 
-    expect(eval(await jsWatchBundle("./test/modules/m1.js"))).toEqual(
+    expect(eval(await jsWatchBundle.bundle("./test/modules/m1.js"))).toEqual(
       "hello world"
     )
   })
   it("can add listener to listen when a file changes and give its path", done => {
     writeFileSync("./test/change_test/f1.js", `export const msg = "hello"`)
-    jsWatchBundle("./test/change_test/f1.js").then(result => {
+
+    jsWatchBundle.watch("./test/change_test/f1.js", async (ev, path) => {
+      expect(path).toEqual(join(process.cwd(), "./test/change_test/f1.js"))
+
+      const result = await jsWatchBundle.bundle("./test/change_test/f1.js")
+
+      expect(eval(result).msg).toEqual("hello world")
+      done()
+    })
+
+    jsWatchBundle.bundle("./test/change_test/f1.js").then(result => {
       try {
         expect(eval(result).msg).toEqual("hello")
       } catch (e) {
         done(e)
       }
-      jsWatchBundle.on("change", async path => {
-        expect(path).toEqual(join(process.cwd(), "./test/change_test/f1.js"))
-
-        const result = await jsWatchBundle("./test/change_test/f1.js")
-
-        expect(eval(result).msg).toEqual("hello world")
-        done()
-      })
       writeFile("./test/change_test/f1.js", `export const msg = "hello world"`)
     })
   })

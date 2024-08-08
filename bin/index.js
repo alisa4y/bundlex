@@ -13,18 +13,18 @@ const data = {
   watch: false,
   output: join(process.cwd(), outputPath),
 }
-let bundle = jsBundle
+let bundle
 
 // --------------------  main  --------------------
 async function main() {
   parseArgs(data, ...args)
 
-  if (data.watch) bundle = jsWatchBundle
+  bundle = data.watch ? jsWatchBundle.bundle : jsBundle
 
-  await doBundle(filename)
+  await doBundle()
 
   if (data.watch) {
-    jsWatchBundle.on("change", doBundle)
+    jsWatchBundle.watch(filename, doBundle)
     onProcessTermination(() => jsWatchBundle.close())
   } else process.exit()
 }
@@ -54,10 +54,10 @@ args are :
 
   return data
 }
-async function doBundle(path) {
-  console.log("bundling...")
-  await writeFile(data.output, await bundle(path), "utf8")
-  console.log("bundled into: " + data.output)
+async function doBundle() {
+  console.log("bundling file: " + filename)
+  await writeFile(data.output, await bundle(filename), "utf8")
+  console.log("...bundled into: " + data.output)
 }
 
 // --------------------  main call  --------------------

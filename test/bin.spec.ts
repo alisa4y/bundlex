@@ -25,7 +25,7 @@ describe("CLI command tests", () => {
 
       const { msg } = eval(readFileSync("./bundle.js").toString())
 
-      expect(stdout).toContain("bundling...")
+      expect(stdout).toContain("bundling file: ./test/cli/b.js")
       expect(msg).toEqual("heey")
       done()
     })
@@ -43,7 +43,7 @@ describe("CLI command tests", () => {
 
         const { msg } = eval(readFileSync(customPath).toString())
 
-        expect(stdout).toContain("bundling...")
+        expect(stdout).toContain("bundling file: ./test/cli/b.js")
         expect(msg).toEqual("heey")
         done()
       }
