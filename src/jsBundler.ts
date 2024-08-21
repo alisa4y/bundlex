@@ -32,13 +32,24 @@ const linkParser = curry(parse, {
   }),
 } as Converter)
 const mainParse = compose(linkParser, stringParser)
-const read = retry(readFile, 250, 2000)
+const read = retry(
+  async path => {
+    // sometimes reading a path mistakingly giving empty content
+    const content = await readFile(path, "utf-8")
+
+    if (content.trim() === "") throw new Error(`File is empty at path: ${path}`)
+
+    return content
+  },
+  250,
+  2000
+)
 
 // --------------------  extractor  --------------------
 export async function extractor(path: string): Promise<Info> {
   if (!existsSync(path)) throw new Error(`path: "${path}" not exists`)
 
-  const content = transpileTs((await read(path, "utf-8")) as string)
+  const content = transpileTs((await read(path)) as string)
   const ps = mainParse([{ type: "text", content }])
   const imports: string[] = []
 
@@ -176,7 +187,7 @@ async function findModuleEntryPath(path: string): Promise<string> {
     throw new Error("no package.json found at path: " + path)
 
   const { main, browser, module, unpkg, jsdelivr } = JSON.parse(
-    (await read(packageJsonPath, "utf8")) as string
+    (await read(packageJsonPath)) as string
   )
   const entry = main || browser || module || unpkg || jsdelivr
   const filePath = join(path, entry)

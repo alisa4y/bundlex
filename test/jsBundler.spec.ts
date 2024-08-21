@@ -109,8 +109,10 @@ describe("jsBundler", () => {
 
     expect(a).toEqual("AB")
   })
-  it("won't throw error on empty files ", async () => {
-    await expect(jsBundle("./test/emptyFile.js")).resolves.not.toThrow()
+  it("will throw error on empty files ", async () => {
+    await expect(jsBundle("./test/emptyFile.js")).rejects.toThrow(
+      `File is empty at path: D:\\web\\bundlex\\test\\emptyFile.js`
+    )
   })
 })
 describe("watch jsBundle", () => {
