@@ -1,4 +1,4 @@
-import { mapFactory, throttle } from "vaco"
+import { debounce, mapFactory, throttle } from "vaco"
 import {
   WatchBundle,
   WatcherBundleData,
@@ -120,7 +120,7 @@ export function createWatcherBundler(
       path = getAbsPath(path)
       const data = await getBundleData(path)
 
-      onChangeListeners(path).push(listener)
+      onChangeListeners(path).push(debounce(listener, 500))
       await getAllImports(data)
       return {
         close: () => {
