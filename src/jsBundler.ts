@@ -118,7 +118,8 @@ function splitByRegex(str: string, { regex, converter }: Converter): Parser[] {
   let match = regex.exec(str)
 
   while (match) {
-    result.push({ type: "text", content: str.slice(lastIndex, match.index) })
+    if (lastIndex < match.index)
+      result.push({ type: "text", content: str.slice(lastIndex, match.index) })
     result.push(converter(...match))
 
     lastIndex = match.index + match[0].length
