@@ -1,1 +1,7 @@
-module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
+module.exports = exports = factory(
+  require("./a"),
+  require("./b"),
+  require("./m"),
+  require("./m2"),
+  require("./backTickReq")
+)

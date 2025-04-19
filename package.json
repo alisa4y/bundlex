@@ -32,7 +32,7 @@
   "dependencies": {
     "ontermination": "^1.0.1",
     "typescript": "^5.5.3",
-    "vaco": "^3.0.1"
+    "vaco": "^3.4.1"
   },
   "devDependencies": {
     "@types/jest": "^29.2.2",
@@ -40,6 +40,7 @@
     "jest": "^29.3.1",
     "js-cookie": "^3.0.1",
     "jsxpiler": "^0.0.1",
+    "sqlite3": "^5.1.7",
     "ts-jest": "^29.0.3"
   }
 }

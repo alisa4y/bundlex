@@ -14,9 +14,13 @@ import { writeFileSync } from "fs"
 describe("extractor", () => {
   it("detects require paths", async () => {
     const info = await extractor("./test/common/multiReq.js")
-    const links = ["core", "enc-base64", "md5", "evpkdf", "cipher-core"].map(
-      p => p + ".js"
-    )
+    const links = [
+      "test\\common\\a.js",
+      "test\\common\\b.js",
+      "test\\common\\m.js",
+      "test\\common\\m2.js",
+      "test\\common\\backTickReq.js",
+    ]
 
     expect(info.imports.every((imp, i) => imp.endsWith(links[i]))).toBe(true)
   })
@@ -240,5 +244,12 @@ describe("fixing some bugs on real life projects", () => {
     const code = await jsBundle("./test/classTest.js")
 
     expect(() => eval(code)).not.toThrow
+  })
+})
+describe("fixing bug which cannot find entry module for sqlite3 ", () => {
+  test("requirng sqlite3 and it should work", () => {
+    expect(async () => {
+      await jsBundle("./test/modules/sqliteImport.ts")
+    }).not.toThrow()
   })
 })

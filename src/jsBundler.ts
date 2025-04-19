@@ -1,9 +1,10 @@
 import { Info } from "./data"
 import { existsSync } from "fs"
 import { readFile, stat } from "fs/promises"
-import { compose, mapFactory, retry, curry } from "vaco"
-import { extname, dirname, join } from "path"
+import { compose, mapFactory, retry, curry, catchError } from "vaco"
+import { extname, dirname, join, isAbsolute } from "path"
 import ts from "typescript"
+import Module from "module"
 
 // --------------------  constants  --------------------
 // TODO: check string pattern faster, change link rgx to be right side only
@@ -61,7 +62,17 @@ export async function extractor(path: string): Promise<Info> {
 
         if (linkStr.type !== "string") return
 
-        const linkPath = await fixPath(linkStr.content.slice(1, -1), path)
+        const requiredPath = linkStr.content.slice(1, -1)
+
+        if (isNodeNativeModule(requiredPath)) {
+          console.warn(
+            `Native module "${requiredPath}" is required for file at path: ${path}`
+          )
+          // p.content = `require("${requiredPath}")`
+          return
+        }
+
+        const linkPath = await fixPath(requiredPath, path)
         linkStr.content = ""
         p.content = idGen(linkPath) + "("
 
@@ -89,6 +100,15 @@ function transpileTs(content: string): string {
     esModuleInterop: true,
     jsx: ts.JsxEmit.Preserve,
   })
+}
+function isNodeNativeModule(modulePath: string): boolean {
+  // Remove the 'node:' prefix if present (introduced in newer Node versions)
+  const corePath = modulePath.startsWith("node:")
+    ? modulePath.substring(5)
+    : modulePath
+
+  // Check if the core path exists in the list of built-in modules
+  return Module.builtinModules.includes(corePath)
 }
 
 // --------------------  bundler  --------------------
@@ -136,49 +156,35 @@ function splitByRegex(str: string, { regex, converter }: Converter): Parser[] {
 }
 
 // --------------------  normalize link  --------------------
-async function fixPath(path: string, refPath: string): Promise<string> {
-  let p: string
+async function fixPath(filePath: string, refPath: string): Promise<string> {
   const dir = dirname(refPath)
 
-  if (path[0] === ".") p = join(dir, path)
-  else if (existsSync(path) && (await stat(path)).isFile()) p = path
-  else {
-    const modulePath = join(findNodeModules(dir), path)
+  if (filePath[0] === ".") {
+    const foundFile = await get1stEntryFile(join(dir, filePath))
 
-    if (existsSync(modulePath) && (await stat(modulePath)).isFile())
-      p = modulePath
-    else
-      try {
-        p = await findModuleEntryPath(modulePath)
-      } catch (e) {
-        console.error("Got error in finding path required by file: " + refPath)
-        throw e
-      }
+    if (foundFile === null)
+      throw new Error(`Local file not found at path: ${filePath}`)
+
+    return foundFile
   }
+  if (
+    isAbsolute(filePath) &&
+    existsSync(filePath) &&
+    (await stat(filePath)).isFile()
+  )
+    return filePath
 
-  if (existsSync(p)) {
-    if ((await stat(p)).isDirectory()) {
-      const ext = extname(refPath)
+  const modulePath = join(findNodeModules(dir), filePath)
 
-      if (ext === ".ts") {
-        const tsIndexFile = join(p, "index.ts")
+  if (existsSync(modulePath) && (await stat(modulePath)).isFile())
+    return modulePath
 
-        if (existsSync(tsIndexFile)) return tsIndexFile
-      }
-
-      return join(p, "index.js")
-    }
-  } else {
-    if (!p.endsWith(".ts") || !p.endsWith(".js")) {
-      const tsFile = p + ".ts"
-
-      if (existsSync(tsFile)) return tsFile
-
-      return p + ".js"
-    }
+  try {
+    return await findModuleEntryPath(modulePath)
+  } catch (e) {
+    console.error("Got error in finding path required by file: " + refPath)
+    throw e
   }
-
-  return p
 }
 
 async function findModuleEntryPath(path: string): Promise<string> {
@@ -187,17 +193,63 @@ async function findModuleEntryPath(path: string): Promise<string> {
   if (!existsSync(packageJsonPath))
     throw new Error("no package.json found at path: " + path)
 
-  const { main, browser, module, unpkg, jsdelivr } = JSON.parse(
-    (await read(packageJsonPath)) as string
+  const [error, packageJsonFile] = await catchError(read, packageJsonPath)
+  if (error) {
+    throw new Error(
+      `failed to read package.json at path: ${packageJsonPath}\n\t error: ${error.message}`
+    )
+  }
+
+  const [parsedError, parsedPackageJson] = await catchError(
+    JSON.parse,
+    packageJsonFile
   )
+  if (parsedError) {
+    throw new Error(
+      `failed to parse package.json at path: ${packageJsonPath}\n\t error: ${parsedError.message}`
+    )
+  }
+
+  const { main, browser, module, unpkg, jsdelivr } = parsedPackageJson
   const entry = main || browser || module || unpkg || jsdelivr
-  const filePath = join(path, entry)
 
-  if (existsSync(filePath)) return filePath
+  if (!entry) {
+    throw new Error(
+      "no entry file found in package.json, path: " + packageJsonPath
+    )
+  }
+  if (typeof entry !== "string") {
+    throw new Error(
+      "entry file in package.json is not a string, path: " + packageJsonPath
+    )
+  }
 
-  throw new Error(
-    "no entry file found in package.json, path: " + packageJsonPath
-  )
+  const entryFile = await get1stEntryFile(join(path, entry))
+
+  if (entryFile === null)
+    throw new Error(
+      `The entry file at ${entry} found in package.json is not a file, path: ` +
+        packageJsonPath
+    )
+
+  return entryFile
+}
+async function get1stEntryFile(entryPath: string): Promise<string | null> {
+  const files = [
+    entryPath,
+    join(entryPath, "index.ts"),
+    join(entryPath, "index.js"),
+    entryPath + ".ts",
+    entryPath + ".js",
+  ]
+
+  for (const entryPath of files) {
+    if (existsSync(entryPath) && (await stat(entryPath)).isFile()) {
+      return entryPath
+    }
+  }
+
+  return null
 }
 function findNodeModules(dir: string): string {
   const mainDir = dir
