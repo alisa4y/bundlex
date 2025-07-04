@@ -30,7 +30,7 @@ describe("CLI command tests", () => {
       const bundleContent = readFileSync(defaultPath).toString()
       const { msg } = eval(bundleContent) // eval can still throw
       expect(msg).toEqual("heey")
-    } catch (execResult) {
+    } catch (execResult: any) {
       // Handle errors from exec (rejected Promise)
       const { error, stderr } = execResult as { error: Error; stderr: string }
       console.error("Execution failed. Stderr:", stderr)
@@ -38,24 +38,27 @@ describe("CLI command tests", () => {
       throw error // Re-throwing the error makes Jest fail the test clearly
     }
   })
-  it("can take output path option", done => {
-    exec(
-      `npx bundlex ${filePath} --output ${customPath}`,
-      async (error, stdout, stderr) => {
-        if (error) {
-          done(error)
-          return
-        }
+  it("can take output path option", async () => {
+    try {
+      const { stdout, stderr } = await execPromise(
+        `npx bundlex ${filePath} --output ${customPath}`
+      )
 
-        await timeout(200)
+      await timeout(2000)
 
-        const { msg } = eval(readFileSync(customPath).toString())
-
-        expect(stdout).toContain("bundling file: ./test/cli/b.js")
-        expect(msg).toEqual("heey")
-        done()
+      if (stderr) {
+        console.warn("stderr output:", stderr)
+        throw new Error(`Command produced unexpected stderr: ${stderr}`)
       }
-    )
+      expect(stdout).toContain("bundling file: ./test/cli/b.js")
+      expect(existsSync(customPath)).toBe(true)
+      const { msg } = eval(readFileSync(customPath).toString())
+      expect(msg).toEqual("heey")
+    } catch (execResult: any) {
+      const { error, stderr } = execResult as { error: Error; stderr: string }
+      console.error("Execution failed. Stderr:", stderr)
+      throw error
+    }
   })
   afterAll(() => {
     clean()
@@ -79,11 +82,10 @@ function execPromise(
       command,
       (error: ExecException | null, stdout: string, stderr: string) => {
         if (error) {
-          // Reject with an object containing the error and stderr for more context
           reject({ error, stderr })
           return
         }
-        // Resolve with stdout and stderr
+
         resolve({ stdout, stderr })
       }
     )

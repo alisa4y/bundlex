@@ -1,4 +1,4 @@
-import { debounce, mapFactory, throttle } from "vaco"
+import { catchError, debounce, mapFactory, throttle } from "vaco"
 import {
   WatchBundle,
   WatcherBundleData,
@@ -12,20 +12,37 @@ import { watch, FSWatcher } from "fs"
 import { join } from "path"
 import { onProcessTermination } from "ontermination"
 import { isAbsolute } from "path"
+import { isNodeNativeModule } from "./jsBundler"
 
 // --------------------  bundlers  --------------------
 export function createBundler(
   extractor: InfoExtractor,
   bundler: Bundler
 ): Bundle {
-  return async (path: string) =>
-    bundler(await getAllInfos(getAbsPath(path), extractor))
+  return async (path: string) => {
+    const [error, infos] = await catchError(
+      getAllInfos,
+      getAbsPath(path),
+      extractor
+    )
+
+    if (error) {
+      throw new Error(
+        `catched error on bundling file: ${path}\n${(error as any).message}`
+      )
+    }
+
+    return bundler(infos)
+  }
 }
 async function getAllInfos(
   path: string,
   extractor: (p: string) => Promise<Info>,
   seenPath = new Set<string>()
 ): Promise<Info[]> {
+  if (isNodeNativeModule(path)) {
+    throw new Error(`Cannot bundle node native module: "${path}"`)
+  }
   if (seenPath.has(path)) return []
 
   seenPath.add(path)

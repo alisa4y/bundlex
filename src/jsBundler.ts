@@ -65,10 +65,8 @@ export async function extractor(path: string): Promise<Info> {
         const requiredPath = linkStr.content.slice(1, -1)
 
         if (isNodeNativeModule(requiredPath)) {
-          console.warn(
-            `Native module "${requiredPath}" is required for file at path: ${path}`
-          )
-          // p.content = `require("${requiredPath}")`
+          imports.push(requiredPath)
+
           return
         }
 
@@ -101,7 +99,7 @@ function transpileTs(content: string): string {
     jsx: ts.JsxEmit.Preserve,
   })
 }
-function isNodeNativeModule(modulePath: string): boolean {
+export function isNodeNativeModule(modulePath: string): boolean {
   // Remove the 'node:' prefix if present (introduced in newer Node versions)
   const corePath = modulePath.startsWith("node:")
     ? modulePath.substring(5)

@@ -246,10 +246,8 @@ describe("fixing some bugs on real life projects", () => {
     expect(() => eval(code)).not.toThrow
   })
 })
-describe("fixing bug which cannot find entry module for sqlite3 ", () => {
-  test("requirng sqlite3 and it should work", () => {
-    expect(async () => {
-      await jsBundle("./test/modules/sqliteImport.ts")
-    }).not.toThrow()
+describe("bundling modules with native dependencies", () => {
+  test("should throw an error when bundling a module with native dependencies like sqlite3", async () => {
+    await expect(jsBundle("./test/modules/sqliteImport.ts")).rejects.toThrow()
   })
 })
