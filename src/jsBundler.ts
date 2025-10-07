@@ -70,7 +70,11 @@ export async function extractor(path: string): Promise<Info> {
           return
         }
 
-        const linkPath = await fixPath(requiredPath, path)
+        const linkPath = require.resolve(requiredPath, {
+          paths: [dirname(path)],
+        })
+        // const linkPath = await fixPath(requiredPath, path)
+
         linkStr.content = ""
         p.content = idGen(linkPath) + "("
 

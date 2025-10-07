@@ -8,12 +8,12 @@ import {
 import { writeFile, readFile } from "fs/promises"
 import { timeout } from "vaco"
 import { transpileJSX } from "jsxpiler"
-import { join } from "path"
+import { join, resolve } from "path"
 import { writeFileSync } from "fs"
 // --------------------  tests  --------------------
 describe("extractor", () => {
   it("detects require paths", async () => {
-    const info = await extractor("./test/common/multiReq.js")
+    const info = await extractor(resolve("./test/common/multiReq.js"))
     const links = [
       "test\\common\\a.js",
       "test\\common\\b.js",
@@ -62,6 +62,11 @@ describe("jsBundler", () => {
     const result = await jsBundle("./test/common/m.js")
     const exp = eval(result)
     expect(exp.data).toEqual("data of m.js")
+  })
+  it("testing module.exports with function ", async () => {
+    const result = await jsBundle("./test/common/m3.js")
+
+    expect(result).toContain("sendMessage")
   })
   it("can bundle from node_modules", async () => {
     const result = await jsBundle("./test/modules/m3.js")

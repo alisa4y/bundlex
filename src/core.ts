@@ -9,9 +9,8 @@ import {
   Info,
 } from "./data"
 import { watch, FSWatcher } from "fs"
-import { join } from "path"
+import { resolve } from "path"
 import { onProcessTermination } from "ontermination"
-import { isAbsolute } from "path"
 import { isNodeNativeModule } from "./jsBundler"
 
 // --------------------  bundlers  --------------------
@@ -22,7 +21,7 @@ export function createBundler(
   return async (path: string) => {
     const [error, infos] = await catchError(
       getAllInfos,
-      getAbsPath(path),
+      resolve(path),
       extractor
     )
 
@@ -134,7 +133,7 @@ export function createWatcherBundler(
   })
   const transpiler: WatchBundle = {
     watch: async (path, listener) => {
-      path = getAbsPath(path)
+      path = resolve(path)
       const data = await getBundleData(path)
 
       onChangeListeners(path).push(debounce(listener, 500))
@@ -148,7 +147,7 @@ export function createWatcherBundler(
       }
     },
     bundle: async path => {
-      path = getAbsPath(path)
+      path = resolve(path)
       const data = await getBundleData(path)
 
       return bundler((await getAllImports(data)).map(v => v.info))
@@ -194,9 +193,4 @@ function findTopBundlesData(
   results.push(bData)
 
   return results
-}
-
-// --------------------  tools  --------------------
-function getAbsPath(path: string): string {
-  return isAbsolute(path) ? path : join(process.cwd(), path)
 }
